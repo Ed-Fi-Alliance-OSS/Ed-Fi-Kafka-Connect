@@ -41,8 +41,8 @@ auditing.
    detection.
 
 > [!TIP]
-> The OpenSSF Scorecard "dings" this repository for not having an approved
-> fuzzer. Unfortunately, none of the approved fuzzers supports .NET
+> The OpenSSF Scorecard "dings" this repository for not having an
+> approved fuzzer. Unfortunately, none of the approved fuzzers supports .NET
 > applications, so this is not something we can remedy.
 
 ### Development Pipeline

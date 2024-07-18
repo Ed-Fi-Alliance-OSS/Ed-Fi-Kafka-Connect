@@ -36,20 +36,23 @@ transforms.GenerateIndexFromResource.field.name=projectName,resourceVersion,reso
 
 ### Prerequisites
 
-- Install, if you don't have it, gradle version 7.2.4 according to the [installation guide](https://gradle.org/install/)
-- To verify your installation, pen a console (or a Windows command prompt) and run gradle -v to run gradle and display the version, e.g.:
-`> gradle -v`
-Result:
-```
+- Install, if you don't have it, gradle version 7.2.4 according to the
+  [installation guide](https://gradle.org/install/)
+- To verify your installation, pen a console (or a Windows command prompt) and
+run gradle -v to run gradle and display the version, e.g.: `> gradle -v` Result:
+
+```none
 ------------------------------------------------------------
 Gradle 7.2.4
 ------------------------------------------------------------
 ```
 
-- To run the transforms locally for the first time you need to build the gradle-wrapper.jar. To generate it, run the following command, this will add the gradle-wrapper.jar in the gradle\wrapper folder
-`> gradle wrapper`
+- To run the transforms locally for the first time you need to build the
+gradle-wrapper.jar. To generate it, run the following command, this will add the
+gradle-wrapper.jar in the gradle\wrapper folder `> gradle wrapper`
 
 ### Tasks
+
 This project includes a series of *gradle* tasks:
 
 - `./gradlew build`: Compile code
@@ -59,8 +62,9 @@ This project includes a series of *gradle* tasks:
 - `./gradlew installDist`: Creates a jar distributable file, located under
   `/build/install/ed-fi-kafka-connect-transforms/ed-fi-kafka-connect-transforms-{version}.jar`
 
-This product includes software developed at [The Apache Software Foundation](https://www.apache.org/),
-used in accordance with the [Apache License, Version 2.0](./LICENSE)
+This product includes software developed at [The Apache Software
+Foundation](https://www.apache.org/), used in accordance with the [Apache
+License, Version 2.0](./LICENSE)
 
 This product also includes lines of code copied from and inspired by
 [Aiven-Open/transforms-for-apache-kafka-connect](https://github.com/Aiven-Open/transforms-for-apache-kafka-connect),
