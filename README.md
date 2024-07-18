@@ -15,7 +15,7 @@ more details about configuring transformations on how to install transforms.
 This transformation builds an index based on a group of values contained in the
 body of the result, separated by $.
 
-- `org.ed-fi.kafka.connect.transforms.GenerateIndexFromDmsResource`
+- `org.edfi.kafka.connect.transforms.GenerateIndexFromDmsResource`
   - works on values.
 
 The transformation defines the following configurations:
@@ -28,7 +28,7 @@ Here is an example of this transformation configuration:
 
 ```properties
 transforms=GenerateIndexFromDmsResource
-transforms.GenerateIndexFromDmsResource.type=org.ed-fi.kafka.connect.transforms.GenerateIndexFromDmsResource
+transforms.GenerateIndexFromDmsResource.type=org.edfi.kafka.connect.transforms.GenerateIndexFromDmsResource
 transforms.GenerateIndexFromDmsResource.field.name=projectName,resourceVersion,resourceName
 ```
 
