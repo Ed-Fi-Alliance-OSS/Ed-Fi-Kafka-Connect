@@ -26,11 +26,6 @@ auditing.
 
 1. Static Application Security Testing (SAST) using
    [CodeQL](https://codeql.github.com/).
-   * Note: we only run CodeQL when C# files are modified. Thus a pull request
-     only dealing with Docker files, or markdown files, for example, will not
-     execute CodeQL. One impact: this repository gets a score of 9 out of 10 in
-     the OpenSSF Scorecard due to some pull requests not having a SAST
-     execution.
 2. Dependency review and analysis using
    [Dependabot](https://docs.github.com/en/code-security/dependabot/working-with-dependabot)
    (nightly review of the `main` branch) and
@@ -39,11 +34,6 @@ auditing.
 3. [Trojan
    Source](https://www.malwarebytes.com/blog/news/2021/11/trojan-source-hiding-malicious-code-in-plain-sight)
    detection.
-
-> [!TIP]
-> The OpenSSF Scorecard "dings" this repository for not having an
-> approved fuzzer. Unfortunately, none of the approved fuzzers supports .NET
-> applications, so this is not something we can remedy.
 
 ### Development Pipeline
 

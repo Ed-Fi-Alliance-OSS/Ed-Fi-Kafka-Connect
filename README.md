@@ -10,12 +10,12 @@ See [the Kafka
 documentation](https://kafka.apache.org/documentation/#connect_transforms) for
 more details about configuring transformations on how to install transforms.
 
-### `GenerateIndexFromResource`
+### `GenerateIndexFromDmsResource`
 
 This transformation builds an index based on a group of values contained in the
 body of the result, separated by $.
 
-- `org.ed-fi.kafka.connect.transforms.GenerateIndexFromResource`
+- `org.ed-fi.kafka.connect.transforms.GenerateIndexFromDmsResource`
   - works on values.
 
 The transformation defines the following configurations:
@@ -27,9 +27,9 @@ The transformation defines the following configurations:
 Here is an example of this transformation configuration:
 
 ```properties
-transforms=GenerateIndexFromResource
-transforms.GenerateIndexFromResource.type=com.github.edfiexchangeoss.meadowlark.kafka.connect.transforms.GenerateIndexFromResource
-transforms.GenerateIndexFromResource.field.name=projectName,resourceVersion,resourceName
+transforms=GenerateIndexFromDmsResource
+transforms.GenerateIndexFromDmsResource.type=org.ed-fi.kafka.connect.transforms.GenerateIndexFromDmsResource
+transforms.GenerateIndexFromDmsResource.field.name=projectName,resourceVersion,resourceName
 ```
 
 ## Running transformations
@@ -62,10 +62,13 @@ This project includes a series of *gradle* tasks:
 - `./gradlew installDist`: Creates a jar distributable file, located under
   `/build/install/ed-fi-kafka-connect-transforms/ed-fi-kafka-connect-transforms-{version}.jar`
 
-This product includes software developed at [The Apache Software
-Foundation](https://www.apache.org/), used in accordance with the [Apache
-License, Version 2.0](./LICENSE)
+## Legal Information
 
-This product also includes lines of code copied from and inspired by
-[Aiven-Open/transforms-for-apache-kafka-connect](https://github.com/Aiven-Open/transforms-for-apache-kafka-connect),
-also used under terms of the Apache License, Version 2.0.
+Copyright (c) 2024 Ed-Fi Alliance, LLC and contributors.
+
+Licensed under the [Apache License, Version 2.0](./LICENSE) (the "License").
+
+Unless required by applicable law or agreed to in writing, software distributed
+under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+CONDITIONS OF ANY KIND, either express or implied. See the License for the
+specific language governing permissions and limitations under the License.
