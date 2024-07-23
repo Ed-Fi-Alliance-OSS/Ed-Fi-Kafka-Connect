@@ -47,11 +47,10 @@ class GenerateIndexFromDmsResourceTest {
     private static final String NEW_TOPIC = "new_topic";
 
     @Test
-    void nullSchema() {
+    void nullValue() {
         final SinkRecord originalRecord = record(null);
-        assertThatThrownBy(() -> transformation(FIELD).apply(originalRecord))
-                .isInstanceOf(DataException.class)
-                .hasMessage("value can't be null: " + originalRecord);
+        final SinkRecord result = transformation(FIELD).apply(originalRecord);
+        assertThat(result).isEqualTo(null);
     }
 
     @Test
@@ -68,14 +67,6 @@ class GenerateIndexFromDmsResourceTest {
         assertThatThrownBy(() -> transformation(FIELD).apply(originalRecord))
                 .isInstanceOf(DataException.class)
                 .hasMessage("value type must be an object: " + originalRecord);
-    }
-
-    @Test
-    void generateIndex_NullStruct() {
-        final SinkRecord originalRecord = record(null);
-        assertThatThrownBy(() -> transformation(FIELD).apply(originalRecord))
-                .isInstanceOf(DataException.class)
-                .hasMessage("value can't be null: " + originalRecord);
     }
 
     @Test

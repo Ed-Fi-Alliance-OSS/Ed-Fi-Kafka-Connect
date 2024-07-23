@@ -51,6 +51,11 @@ public class GenerateIndexFromDmsResource<R extends ConnectRecord<R>> implements
 
     @Override
     public R apply(final R record) {
+
+        if (record.value() == null) {
+            return null;
+        }
+
         final SchemaAndValue schemaAndValue = getSchemaAndValue(record);
 
         final Optional<String> newTopic;
