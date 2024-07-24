@@ -8,11 +8,11 @@ privately.
 We prefer that you use the [GitHub mechanism for privately reporting a
 vulnerability](https://docs.github.com/en/code-security/security-advisories/guidance-on-reporting-and-writing/privately-reporting-a-security-vulnerability#privately-reporting-a-security-vulnerability).
 Under the [main repository's security
-tab](https://github.com/Ed-Fi-Alliance-OSS/security), click "Report a
+tab](https://github.com/Ed-Fi-Alliance-OSS/Ed-Fi-Kafka-Connect/security), click "Report a
 vulnerability" to open the advisory form.
 
 If you have any further concerns that are not addressed by this process, please
-submit a case through the [Ed-Fi Community Hub](https://success.ed-fi.org)
+submit a case through the [Ed-Fi Community Hub](https://community.ed-fi.org)
 
 ## Security Automation
 
@@ -48,8 +48,4 @@ auditing.
 ### Binaries
 
 1. Binaries are built and managed directly inside GitHub, not by developers.
-2. Releases contain provenance
-   [attestations](https://slsa.dev/attestation-model) and a [software bill of
-   materials](https://www.cisa.gov/sbom) (SBOM) files describing the build
-   process and dependencies.
-3. Docker images are pinned to specific known SHA256 hash values.
+2. Docker images are pinned to specific known SHA256 hash values.
