@@ -28,7 +28,10 @@ permissions: read-all
 jobs:
   build:
     name: Build
-    runs-on: ubuntu-latest    
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: kafka/ed-fi-kafka-connect-transforms
     steps:
       - name: Checkout the Repo
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
@@ -47,20 +50,16 @@ jobs:
         uses: gradle/actions/setup-gradle@dbbdc275be76ac10734476cc723d82dfe7ec6eda # v3.4.2
 
       - name: Generate Gradle wrapper
-        run: gradle wrapper
-        working-directory: kafka/ed-fi-kafka-connect-transforms
+        run: gradle wrapper        
 
       - name: Make gradlew executable
-        run: chmod +x ./gradlew
-        working-directory: kafka/ed-fi-kafka-connect-transforms
+        run: chmod +x ./gradlew        
 
       - name: Build with Gradle
-        run: ./gradlew clean build
-        working-directory: kafka/ed-fi-kafka-connect-transforms
+        run: ./gradlew clean build        
 
       - name: Run tests with Gradle
-        run: ./gradlew test
-        working-directory: kafka/ed-fi-kafka-connect-transforms
+        run: ./gradlew test        
       
       - name: Upload Test Results
         if: always()
