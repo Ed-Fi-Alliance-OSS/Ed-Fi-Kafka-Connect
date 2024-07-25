@@ -1,0 +1,80 @@
+# SPDX-License-Identifier: Apache-2.0
+# Licensed to the Ed-Fi Alliance under one or more agreements.
+# The Ed-Fi Alliance licenses this file to you under the Apache License, Version 2.0.
+# See the LICENSE and NOTICES files in the project root for more information.
+
+name: On Pull Request
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "kafka/**"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "kafka/**"
+      - ".github/**/*.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest    
+    steps:
+      - name: Checkout the Repo
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+
+      - name: Dependency Review ("Dependabot on PR")
+        if: ${{ github.event_name == 'pull_request' && !github.event.repository.fork }}
+        uses: actions/dependency-review-action@9129d7d40b8c12c1ed0f60400d00c92d437adcce # v4.1.3
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with: 
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@dbbdc275be76ac10734476cc723d82dfe7ec6eda # v3.4.2
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+        working-directory: kafka/ed-fi-kafka-connect-transforms
+
+      - name: Build with Gradle
+        run: ./gradlew clean build
+        working-directory: kafka/ed-fi-kafka-connect-transforms
+
+      - name: Run tests with Gradle
+        run: ./gradlew test
+        working-directory: kafka/ed-fi-kafka-connect-transforms
+      
+      - name: Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@26f96dfa697d77e81fd5907df203aa23a56210a8 # v4.3.0
+        with:
+          name: Unit Test Results
+          overwrite: true
+          path: |
+            ./kafka/ed-fi-kafka-connect-transforms/build/reports/tests/test/classes/*.html
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Package
+          path: ./kafka/ed-fi-kafka-connect-transforms/build/libs
+
+      - uses: hadolint/hadolint-action@54c9adbab1582c2ef04b2016b760714a4bfde3cf # v3.1.0
+        name: Run Linter on Dockerfile
+        with:
+          dockerfile: ./kafka/Dockerfile
+          failure-threshold: error

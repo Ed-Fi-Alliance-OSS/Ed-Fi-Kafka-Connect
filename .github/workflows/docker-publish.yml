@@ -1,0 +1,53 @@
+# SPDX-License-Identifier: Apache-2.0
+# Licensed to the Ed-Fi Alliance under one or more agreements.
+# The Ed-Fi Alliance licenses this file to you under the Apache License, Version 2.0.
+# See the LICENSE and NOTICES files in the project root for more information.
+
+name: Docker build and publish
+on:
+  workflow_dispatch:
+
+env:
+  IMAGE_NAME: ${{ vars.IMAGE_NAME }}
+  DOCKER_USERNAME: ${{ vars.DOCKER_USERNAME }}
+  DOCKER_HUB_TOKEN: ${{ secrets.DOCKER_HUB_TOKEN }}
+  REF: ${{ github.ref_name }}
+
+permissions: read-all
+
+jobs:
+  docker-publish:
+    name: Publish to Docker Hub
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare Tags
+        id: prepare-tags
+        run: |         
+            IMAGETAG="${{ env.IMAGE_NAME }}:pre"
+            echo "IMAGETAG=$IMAGETAG" >> $GITHUB_OUTPUT
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f95db51fddba0c2d1ec667646a06c2ce06100226  # v3.0.0
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@343f7c4344506bcbf9b4de18042ae17996df046d  # v3.0.0
+        with:
+          username: ${{ env.DOCKER_USERNAME }}
+          password: ${{ env.DOCKER_HUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Data Management Service image
+        id: metadatamanagementservice
+        uses: docker/metadata-action@96383f45573cb7f253c731d3b3ab81c87ef81934  # v5.0.0
+        with:
+          images: ${{ env.IMAGE_NAME }}
+
+      - name: Build and push Kafka connect transforms image
+        uses: docker/build-push-action@0565240e2d4ab88bba5387d719585280857ece09  # v5.0.0
+        with:
+          context: "{{defaultContext}}:kafka"
+          cache-from: type=registry,ref=${{ env.IMAGE_NAME }}:pre
+          cache-to: type=inline
+          file: Dockerfile
+          tags: ${{ steps.prepare-tags.outputs.IMAGETAG }}
+          labels: ${{ steps.metadatamanagementservice.outputs.labels }}
+          push: true

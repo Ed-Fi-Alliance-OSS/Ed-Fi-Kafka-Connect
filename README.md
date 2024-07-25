@@ -1,5 +1,8 @@
 # Ed-Fi Transformations for Apache Kafka® Connect
 
+[![OpenSSF
+Scorecard](https://api.securityscorecards.dev/projects/github.com/Ed-Fi-Alliance-OSS/Ed-Fi-Kafka-Connect/badge)](https://securityscorecards.dev/viewer/?uri=github.com/Ed-Fi-Alliance-OSS/Ed-Fi-Kafka-Connect)
+
 [Single Message Transformations
 (SMTs)](https://kafka.apache.org/documentation/#connect_transforms) for Apache
 Kafka Connect.
