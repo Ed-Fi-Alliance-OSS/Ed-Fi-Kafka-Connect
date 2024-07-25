@@ -16,13 +16,13 @@ ARG package=opensearch-connector-for-apache-kafka-3.1.0.tar
 ADD --chown=kafka --chmod=600 https://github.com/aiven/opensearch-connector-for-apache-kafka/releases/download/v3.1.0/${package} \
     /kafka/connect/
 
-RUN cd /kafka/connect/ && \
-    originalSha=58c27bdb0b8883e2e3291a2aaa42151b77240a33d3361ad620c656e775da14d2 && \
+WORKDIR /kafka/connect/
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+RUN originalSha="58c27bdb0b8883e2e3291a2aaa42151b77240a33d3361ad620c656e775da14d2" && \
     newSha=$(sha256sum ${package} | awk '{print $1}') && \
-    if [ $originalSha != $newSha ]; then exit 1; fi
+    if [ "$originalSha" != "$newSha" ]; then exit 1; fi
 
-RUN cd /kafka/connect/ && \
-    tar -xvf ${package} && \
+RUN tar -xvf ${package} && \
     rm ${package}
 
 COPY --from=build /home/gradle/src/build/libs /kafka/connect/ed-fi-kafka-connect-transforms
