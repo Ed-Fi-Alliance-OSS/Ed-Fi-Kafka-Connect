@@ -48,4 +48,8 @@ auditing.
 ### Binaries
 
 1. Binaries are built and managed directly inside GitHub, not by developers.
-2. Docker images are pinned to specific known SHA256 hash values.
+2. Releases contain provenance
+   [attestations](https://slsa.dev/attestation-model) and a [software bill of
+   materials](https://www.cisa.gov/sbom) (SBOM) files describing the build
+   process and dependencies.
+3. Docker images are pinned to specific known SHA256 hash values.

@@ -7,3 +7,6 @@ gradle
 
 gradlew
 gradlew.bat
+
+# Mac OS
+.DS_Store
