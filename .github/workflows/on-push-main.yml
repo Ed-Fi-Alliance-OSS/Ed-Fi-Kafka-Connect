@@ -25,6 +25,9 @@ permissions:
 jobs:
   dependency-submission:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: kafka/ed-fi-kafka-connect-transforms
     steps:
       - name: Checkout sources
         uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
@@ -35,5 +38,14 @@ jobs:
           java-version: "17"
           distribution: "temurin"
 
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@d9c87d481d55275bb5441eef3fe0e46805f9ef70 # v3.5.0
+
+      - name: Generate Gradle wrapper
+        run: gradle wrapper
+
       - name: Generate and submit dependency graph
         uses: gradle/actions/dependency-submission@d9c87d481d55275bb5441eef3fe0e46805f9ef70 # v3.5.0
+        with:
+          build-root-directory: kafka/ed-fi-kafka-connect-transforms
+        
