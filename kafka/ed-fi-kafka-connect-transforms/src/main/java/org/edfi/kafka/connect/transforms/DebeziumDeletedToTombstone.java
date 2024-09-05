@@ -5,7 +5,6 @@
 package org.edfi.kafka.connect.transforms;
 
 import java.util.Map;
-import java.util.Optional;
 
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.connect.connector.ConnectRecord;
@@ -46,10 +45,9 @@ public class DebeziumDeletedToTombstone<R extends ConnectRecord<R>> implements T
 
         Boolean isDeleted = false;
         try {
-            Struct recordValueStruct = ((Struct)record.value());
+            final Struct recordValueStruct = (Struct) record.value();
             isDeleted = recordValueStruct.getBoolean(DELETED_FIELD);
-        }
-        catch (Exception e) {
+        } catch (final Exception e) {
             throw new DataException("Value type must have __deleted: " + record.toString());
         }
 
