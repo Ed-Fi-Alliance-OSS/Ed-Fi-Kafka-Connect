@@ -27,6 +27,21 @@ transforms=RenameDmsTopicToOpenSearchIndex
 transforms.RenameDmsTopicToOpenSearchIndex.type=org.edfi.kafka.connect.transforms.RenameDmsTopicToOpenSearchIndex
 ```
 
+### `DebeziumDeletedToTombstone`
+
+This transformation checks for a Debezium _deleted=true flag. If found, it turns it into a tombstone
+
+- `org.edfi.kafka.connect.transforms.DebeziumDeletedToTombstone`
+  - works on values.
+
+Here is an example of this transformation configuration:
+
+```properties
+transforms=DebeziumDeletedToTombstone
+transforms.DebeziumDeletedToTombstone.type=org.edfi.kafka.connect.transforms.DebeziumDeletedToTombstone
+```
+
+
 ## Running transformations
 
 ### Prerequisites
