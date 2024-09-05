@@ -30,7 +30,7 @@ public class DebeziumDeletedToTombstone<R extends ConnectRecord<R>> implements T
     public void configure(final Map<String, ?> settings) {
     }
 
-    // If _deleted=true, nulls out the record value.
+    // If __deleted=true, nulls out the record value.
     @Override
     public R apply(final R record) {
 
@@ -48,14 +48,11 @@ public class DebeziumDeletedToTombstone<R extends ConnectRecord<R>> implements T
             @SuppressWarnings("unchecked")
             final Map<String, Object> recordValueAsMap = (Map<String, Object>) record.value();
             final String isDeletedString = (String) recordValueAsMap.get(DELETED_FIELD);
-            System.out.println("isDeletedString is " + isDeletedString);
             isDeleted = Boolean.valueOf(isDeletedString);
         } catch (final Exception e) {
             throw new DataException(
                     "Value type must have __deleted as String: " + record.toString() + " " + e.toString());
         }
-
-        System.out.println("isDeleted is " + isDeleted);
 
         return record.newRecord(
                 record.topic(),
