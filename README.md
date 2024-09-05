@@ -15,12 +15,9 @@ more details about configuring transformations on how to install transforms.
 
 ### `RenameDmsTopicToOpenSearchIndex`
 
-This transformation renames the DMS topic to be an OpenSearch index based on the document ProjectName and ResourceName
+This transformation renames the DMS topic to be an OpenSearch index based on the document ProjectName and ResourceName.
 
-- `org.edfi.kafka.connect.transforms.RenameDmsTopicToOpenSearchIndex`
-  - works on values.
-
-Here is an example of this transformation configuration:
+Example of this transformation configuration:
 
 ```properties
 transforms=RenameDmsTopicToOpenSearchIndex
@@ -29,12 +26,9 @@ transforms.RenameDmsTopicToOpenSearchIndex.type=org.edfi.kafka.connect.transform
 
 ### `DebeziumDeletedToTombstone`
 
-This transformation checks for a Debezium _deleted=true flag. If found, it turns it into a tombstone
+This transformation checks for a Debezium _deleted=true flag. If found, it turns it into a tombstone.
 
-- `org.edfi.kafka.connect.transforms.DebeziumDeletedToTombstone`
-  - works on values.
-
-Here is an example of this transformation configuration:
+Example of this transformation configuration:
 
 ```properties
 transforms=DebeziumDeletedToTombstone
@@ -61,6 +55,7 @@ Gradle 7.2.4
 gradle-wrapper.jar. To generate it, run the following command, this will add the
 gradle-wrapper.jar in the gradle\wrapper folder `> gradle wrapper`
   - If you encounter an error message `java.security.NoSuchAlgorithmException: Error constructing implementation (algorithm: Default, provider: SunJSSE, class: sun.security.ssl.SSLContextImpl$DefaultSSLContext)`, gradle could not find your Java cacert trustStore directory. Re-run and specify it explicitly e.g. `gradle wrapper -Djavax.net.ssl.trustStore=/usr/lib/jvm/default-java/lib/security/cacerts`.
+  - If you encounter file system watcher errors/warnings and don't care about gradle watching in the background, add the `--no-watch-fs` flag.
 
 ### Tasks
 
@@ -75,7 +70,7 @@ This project includes a series of *gradle* tasks:
 
 ## Build container
 
-To build the container with a dev tag, simply run `docker build -t edfialliance/ed-fi-kafka-connect:dev` from the `kafka` directory.
+To build the container with a dev tag, simply run `docker build -t edfialliance/ed-fi-kafka-connect:dev .` from the `kafka` directory.
 
 ## Legal Information
 

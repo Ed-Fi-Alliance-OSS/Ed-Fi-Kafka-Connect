@@ -40,27 +40,28 @@ public class DebeziumDeletedToTombstone<R extends ConnectRecord<R>> implements T
             return null;
         }
 
-        if (!(record.value() instanceof Struct)) {
-            throw new DataException("Value type must be a Struct: " + record.toString());
+        if (!(record.value() instanceof Map)) {
+            throw new DataException("Value type must be castable to Map: " + record.toString());
         }
 
-        Boolean isDeleted = false;
+        boolean isDeleted = false;
         try {
-            final Struct recordValueStruct = (Struct) record.value();
-            isDeleted = recordValueStruct.getBoolean(DELETED_FIELD);
+            @SuppressWarnings("unchecked")
+            final Map<String, Object> recordValueAsMap = (Map<String, Object>) record.value();
+            isDeleted = (boolean) recordValueAsMap.get(DELETED_FIELD);
         } catch (final Exception e) {
-            throw new DataException("Value type must have __deleted: " + record.toString());
+            throw new DataException("Value type must have __deleted: " + record.toString() + " " + e.toString());
         }
 
         return record.newRecord(
-            record.topic(),
-            record.kafkaPartition(),
-            record.keySchema(),
-            record.key(),
-            isDeleted ? null : record.valueSchema(),
-            isDeleted ? null : record.value(),
-            record.timestamp(),
-            record.headers());
+                record.topic(),
+                record.kafkaPartition(),
+                record.keySchema(),
+                record.key(),
+                isDeleted ? null : record.valueSchema(),
+                isDeleted ? null : record.value(),
+                record.timestamp(),
+                record.headers());
     }
 
     @Override
