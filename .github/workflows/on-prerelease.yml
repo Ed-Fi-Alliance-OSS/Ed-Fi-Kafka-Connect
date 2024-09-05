@@ -97,7 +97,7 @@ jobs:
           name: ${{ env.PACKAGE_NAME }}
 
       - name: Generate SBOM
-        uses: anchore/sbom-action@v0
+        uses: anchore/sbom-action@483f51618ef5cbe37df7178a55e3e10188e2ff04
         with:
           format: 'spdx-json'
           output-file: ${{ env.PACKAGE_NAME }}-SBOM
@@ -115,7 +115,7 @@ jobs:
           echo "sbom-hash-code=$sbom_hash" >> $GITHUB_OUTPUT
 
       - name: Attest
-        uses: actions/attest-sbom@v1
+        uses: actions/attest-sbom@5026d3663739160db546203eeaffa6aa1c51a4d6
         with:
           subject-path: '${{ github.workspace }}/kafka/${{ env.PACKAGE_NAME }}'
           sbom-path: ${{ env.PACKAGE_NAME }}-SBOM          
