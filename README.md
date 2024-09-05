@@ -52,7 +52,7 @@ Gradle 7.2.4
 ```
 
 - To run the transforms locally for the first time you need to build the
-gradle-wrapper.jar. To generate it, run the following command, this will add the
+gradle-wrapper.jar. To generate it, run the following command from the `ed-fi-kafka-connect-transforms` directory. This will add the
 gradle-wrapper.jar in the gradle\wrapper folder `> gradle wrapper`
   - If you encounter an error message `java.security.NoSuchAlgorithmException: Error constructing implementation (algorithm: Default, provider: SunJSSE, class: sun.security.ssl.SSLContextImpl$DefaultSSLContext)`, gradle could not find your Java cacert trustStore directory. Re-run and specify it explicitly e.g. `gradle wrapper -Djavax.net.ssl.trustStore=/usr/lib/jvm/default-java/lib/security/cacerts`.
   - If you encounter file system watcher errors/warnings and don't care about gradle watching in the background, add the `--no-watch-fs` flag.
