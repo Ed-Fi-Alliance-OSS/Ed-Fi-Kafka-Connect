@@ -47,16 +47,21 @@ public class DebeziumDeletedToTombstone<R extends ConnectRecord<R>> implements T
         try {
             @SuppressWarnings("unchecked")
             final Map<String, Object> recordValueAsMap = (Map<String, Object>) record.value();
-            isDeleted = (boolean) recordValueAsMap.get(DELETED_FIELD);
+            final String isDeletedString = (String) recordValueAsMap.get(DELETED_FIELD);
+            System.out.println("isDeletedString is " + isDeletedString);
+            isDeleted = Boolean.valueOf(isDeletedString);
         } catch (final Exception e) {
-            throw new DataException("Value type must have __deleted: " + record.toString() + " " + e.toString());
+            throw new DataException(
+                    "Value type must have __deleted as String: " + record.toString() + " " + e.toString());
         }
+
+        System.out.println("isDeleted is " + isDeleted);
 
         return record.newRecord(
                 record.topic(),
                 record.kafkaPartition(),
-                record.keySchema(),
-                record.key(),
+                isDeleted ? null : record.keySchema(),
+                isDeleted ? null : record.key(),
                 isDeleted ? null : record.valueSchema(),
                 isDeleted ? null : record.value(),
                 record.timestamp(),
