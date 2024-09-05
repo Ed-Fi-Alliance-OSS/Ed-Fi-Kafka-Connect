@@ -60,8 +60,8 @@ public class DebeziumDeletedToTombstone<R extends ConnectRecord<R>> implements T
         return record.newRecord(
                 record.topic(),
                 record.kafkaPartition(),
-                isDeleted ? null : record.keySchema(),
-                isDeleted ? null : record.key(),
+                record.keySchema(),
+                record.key(),
                 isDeleted ? null : record.valueSchema(),
                 isDeleted ? null : record.value(),
                 record.timestamp(),
