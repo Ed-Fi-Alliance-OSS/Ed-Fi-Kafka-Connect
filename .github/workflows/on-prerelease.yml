@@ -104,6 +104,10 @@ jobs:
           upload-release-assets: true
           upload-artifact: true
 
+      - name: Testing hash-code
+        run: |
+          echo ${{ needs.pack.outputs.hash-code }}
+
       #- name: Generate hash code for SBOM
       #  id: sbom-hash-code
       #  shell: bash
@@ -120,7 +124,7 @@ jobs:
       #    subject-path: '${{ github.workspace }}/kafka/${{ env.PACKAGE_NAME }}'
       #    sbom-path: ${{ env.PACKAGE_NAME }}-SBOM
       
-  provenance-create:
+  provenance-create:    
     name: Create Provenance
     needs: pack
     permissions:
