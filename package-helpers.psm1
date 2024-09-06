@@ -21,8 +21,8 @@ function Get-VersionNumber {
 
     $version = $(&minver -t $prefix)
 
-    "dms-v=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-    "dms-semver=$($version -Replace $prefix)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+    "connector-v=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+    "connector-semver=$($version -Replace $prefix)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 }
 
 Export-ModuleMember -Function Get-VersionNumber
