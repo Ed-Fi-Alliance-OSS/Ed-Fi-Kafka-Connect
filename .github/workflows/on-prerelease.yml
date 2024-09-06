@@ -1,0 +1,122 @@
+# SPDX-License-Identifier: Apache-2.0
+# Licensed to the Ed-Fi Alliance under one or more agreements.
+# The Ed-Fi Alliance licenses this file to you under the Apache License, Version 2.0.
+# See the LICENSE and NOTICES files in the project root for more information.
+
+name: On Pre-Release
+on:
+  release:
+    types:
+      - prereleased
+  workflow_dispatch:
+
+env:
+  MANIFEST_FILE: "Ed-Fi-Kafka-Connect-sbom-create.spdx.json"  
+  PACKAGE_NAME: "ed-fi-kafka-connect-transforms"
+  REF: ${{ github.ref_name }}
+
+permissions: read-all
+
+jobs:
+  pack:
+    name: Build and Pack
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: kafka/ed-fi-kafka-connect-transforms
+    outputs:
+      hash-code: ${{ steps.hash-code.outputs.hash-code }}
+      dms-version: ${{ steps.versions.outputs.connector-v }}
+
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        with:
+          fetch-depth: 0
+
+      - name: Set Version Numbers      
+        id: versions
+        working-directory: ./
+        run: |
+          Import-Module ./package-helpers.psm1
+          Get-VersionNumber
+
+      - name: Setup Java
+        uses: actions/setup-java@99b8673ff64fbf99d8d325f52d9a5bdedb8483e9 # v4.2.1
+        with: 
+          java-version: '17'
+          distribution: 'temurin'
+  
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@d9c87d481d55275bb5441eef3fe0e46805f9ef70 # v3.5.0
+
+      - name: Generate Gradle wrapper
+        run: gradle wrapper        
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew   
+
+      - name: Build with Gradle
+        run: |
+          $packageVersion = "${{ steps.versions.outputs.connector-semver }}"
+          ./gradlew clean build -Pversion="${{ steps.versions.outputs.connector-semver }}"  
+        
+      - name: Generate hash for the jar file
+        id: hash-code
+        run: |
+          $jarPath = "${{ github.workspace }}/kafka/ed-fi-kafka-connect-transforms/build/libs/*.jar"        
+          "hash-code=$(sha256sum $jarPath | base64 -w0)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Upload Packages as Artifacts
+        if: success()
+        uses: actions/upload-artifact@26f96dfa697d77e81fd5907df203aa23a56210a8 # v4.3.0
+        with:
+          name: ${{ env.PACKAGE_NAME }}
+          path: ${{ github.workspace }}/kafka/ed-fi-kafka-connect-transforms/build/libs/*.jar
+          if-no-files-found: error
+          retention-days: 30
+
+  sbom-create:
+    name: Create SBOM
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: pwsh
+    needs: pack
+    permissions:
+      actions: read
+      contents: write
+      attestations: write
+      id-token: write
+    outputs:
+      sbom-hash-code: ${{ steps.sbom-hash-code.outputs.sbom-hash-code }}
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+
+      - name: Get Artifacts
+        uses: actions/download-artifact@6b208ae046db98c579e8a3aa621ab581ff575935 #v4.1.1
+        with:
+          name: ${{ env.PACKAGE_NAME }}
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@61119d458adab75f756bc0b9e4bde25725f86a7a
+        with:
+          format: 'spdx-json'
+          output-file: ${{ env.PACKAGE_NAME }}-SBOM
+          upload-release-assets: true
+          upload-artifact: true
+      
+  provenance-create:    
+    name: Create Provenance
+    needs: pack
+    permissions:
+      actions: read
+      id-token: write
+      contents: write      
+    uses: Ed-Fi-Alliance-OSS/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@main
+    with:
+      base64-subjects: ${{ needs.pack.outputs.hash-code }}
+      provenance-name: kafkaconnect.intoto.jsonl
+      upload-assets: true
+      # TODO: remove this after this issue is resolved: https://github.com/slsa-framework/slsa-github-generator/issues/876
+      compile-generator: true      
