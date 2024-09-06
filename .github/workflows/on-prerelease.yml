@@ -104,18 +104,33 @@ jobs:
           upload-release-assets: true
           upload-artifact: true
 
-      - name: Generate hash code for SBOM
-        id: sbom-hash-code
-        shell: bash
-        run: |
+      #- name: Generate hash code for SBOM
+      #  id: sbom-hash-code
+      #  shell: bash
+      #  run: |
           # sha256sum returns "<hashcode>  <name of file". Split that and return only the <hashcode>.
           # sbom_hash=$(sha256sum ${{ github.workspace }}/${{ env.MANIFEST_FILE }} | awk '{split($0,a); print a[1]}')
-          sbom_hash=$(sha256sum ${{ github.workspace }}/${{ env.PACKAGE_NAME }}-SBOM | awk '{split($0,a); print a[1]}')
-          echo $sbom_hash
-          echo "sbom-hash-code=$sbom_hash" >> $GITHUB_OUTPUT
+      #    sbom_hash=$(sha256sum ${{ github.workspace }}/${{ env.PACKAGE_NAME }}-SBOM | awk '{split($0,a); print a[1]}')
+      #    echo $sbom_hash
+      #    echo "sbom-hash-code=$sbom_hash" >> $GITHUB_OUTPUT
 
-      - name: Attest
-        uses: actions/attest-sbom@5026d3663739160db546203eeaffa6aa1c51a4d6
-        with:
-          subject-path: '${{ github.workspace }}/kafka/${{ env.PACKAGE_NAME }}'
-          sbom-path: ${{ env.PACKAGE_NAME }}-SBOM          
+      #- name: Attest
+      #  uses: actions/attest-sbom@5026d3663739160db546203eeaffa6aa1c51a4d6
+      #  with:
+      #    subject-path: '${{ github.workspace }}/kafka/${{ env.PACKAGE_NAME }}'
+      #    sbom-path: ${{ env.PACKAGE_NAME }}-SBOM
+      
+  provenance-create:
+    name: Create Provenance
+    needs: pack
+    permissions:
+      actions: read
+      id-token: write
+      contents: write
+    uses: Ed-Fi-Alliance-OSS/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@main
+    with:
+      base64-subjects: ${{ needs.pack.outputs.hash-code }}
+      provenance-name: dmsApi.intoto.jsonl
+      upload-assets: true
+      # TODO: remove this after this issue is resolved: https://github.com/slsa-framework/slsa-github-generator/issues/876
+      compile-generator: true      
