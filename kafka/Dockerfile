@@ -16,9 +16,9 @@ ARG opensearch=opensearch-connector-for-apache-kafka-3.1.0.tar
 ADD --chown=kafka --chmod=600 https://github.com/aiven/opensearch-connector-for-apache-kafka/releases/download/v3.1.0/${opensearch} \
     /kafka/connect/
 
-ARG iamauth=v2.2.0
+ARG iamauth=2.2.0
 
-ADD --chown=kafka --chmod=600 https://github.com/aws/aws-msk-iam-auth/releases/download/${iamauth}/aws-msk-iam-auth-${iamauth}-all.jar \
+ADD --chown=kafka --chmod=600 https://github.com/aws/aws-msk-iam-auth/releases/download/v${iamauth}/aws-msk-iam-auth-${iamauth}-all.jar \
     /kafka/libs
 
 WORKDIR /kafka/libs
