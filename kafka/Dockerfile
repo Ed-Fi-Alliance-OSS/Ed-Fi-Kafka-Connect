@@ -16,6 +16,17 @@ ARG opensearch=opensearch-connector-for-apache-kafka-3.1.0.tar
 ADD --chown=kafka --chmod=600 https://github.com/aiven/opensearch-connector-for-apache-kafka/releases/download/v3.1.0/${opensearch} \
     /kafka/connect/
 
+ARG iamauth=2.2.0
+
+ADD --chown=kafka --chmod=600 https://github.com/aws/aws-msk-iam-auth/releases/download/v${iamauth}/aws-msk-iam-auth-${iamauth}-all.jar \
+    /kafka/libs
+
+WORKDIR /kafka/libs
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+RUN originalSha="735dd058b81d088e767770d6cc4e7f1a1beea815ced18b66a23b35fd87651e77" && \
+    newSha=$(sha256sum aws-msk-iam-auth-${iamauth}-all.jar | awk '{print $1}') && \
+    if [ "$originalSha" != "$newSha" ]; then exit 1; fi
+
 WORKDIR /kafka/connect/
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN originalSha="58c27bdb0b8883e2e3291a2aaa42151b77240a33d3361ad620c656e775da14d2" && \
