@@ -12,8 +12,12 @@ FROM debezium/connect:2.7.0.Final@sha256:9af456e88dcd60a16c8fabe69477118b10449b3
 LABEL maintainer="Ed-Fi Alliance, LLC and Contributors <techsupport@ed-fi.org>"
 
 ARG opensearch=opensearch-connector-for-apache-kafka-3.1.0.tar
+ARG elasticsearch=elasticsearch-connector-for-apache-kafka-7.0.0.tar
 
 ADD --chown=kafka --chmod=600 https://github.com/aiven/opensearch-connector-for-apache-kafka/releases/download/v3.1.0/${opensearch} \
+    /kafka/connect/
+
+ADD --chown=kafka --chmod=600 https://github.com/Aiven-Open/elasticsearch-connector-for-apache-kafka/releases/download/v7.0.0/${elasticsearch} \
     /kafka/connect/
 
 ARG iamauth=2.2.0
@@ -33,8 +37,15 @@ RUN originalSha="58c27bdb0b8883e2e3291a2aaa42151b77240a33d3361ad620c656e775da14d
     newSha=$(sha256sum ${opensearch} | awk '{print $1}') && \
     if [ "$originalSha" != "$newSha" ]; then exit 1; fi
 
+RUN originalEsSha="396b28251e636f0ed1721a51c771adc26a78a2f332091af7b6f3182c91f20d3b" && \
+    newEsSha=$(sha256sum ${elasticsearch} | awk '{print $1}') && \
+    if [ "$originalEsSha" != "$newEsSha" ]; then exit 1; fi
+
 RUN tar -xvf ${opensearch} && \
     rm ${opensearch}
+
+RUN tar -xvf ${elasticsearch} && \
+    rm ${elasticsearch}
 
 COPY --from=build /home/gradle/src/build/libs /kafka/connect/ed-fi-kafka-connect-transforms
 
