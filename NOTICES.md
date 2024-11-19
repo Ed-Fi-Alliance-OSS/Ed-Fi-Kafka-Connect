@@ -15,6 +15,9 @@ This product includes software developed at [The Apache Software
 Foundation](https://www.apache.org/), used in accordance with the [Apache
 License, Version 2.0](./LICENSE)
 
-This product also includes lines of code copied from and inspired by
-[Aiven-Open/transforms-for-apache-kafka-connect](https://github.com/Aiven-Open/transforms-for-apache-kafka-connect),
-also used under terms of the Apache License, Version 2.0.
+This product distributes Kafka connectors for OpenSearch and Elasticsearch,
+maintained by [Aiven Open](https://github.com/Aiven-Open). In addition, the
+custom Kafka transformations include lines of code copied from and inspired by
+[Aiven-Open/transforms-for-apache-kafka-connect](https://github.com/Aiven-Open/transforms-for-apache-kafka-connect).
+Aiven Open's work is distributed and modified under terms of the Apache License,
+Version 2.0.
