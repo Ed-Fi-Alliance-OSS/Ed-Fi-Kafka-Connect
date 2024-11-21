@@ -20,6 +20,9 @@ jobs:
     name: Publish to Docker Hub
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout code
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+
       - name: Prepare Tags
         id: prepare-tags
         run: |         
@@ -45,6 +48,8 @@ jobs:
         uses: docker/build-push-action@0565240e2d4ab88bba5387d719585280857ece09  # v5.0.0
         with:
           context: "{{defaultContext}}:kafka"
+          build-contexts: |
+            parentdir=./
           cache-from: type=registry,ref=${{ env.IMAGE_NAME }}:pre
           cache-to: type=inline
           file: Dockerfile
