@@ -55,4 +55,4 @@ jobs:
           file: Dockerfile
           tags: ${{ steps.prepare-tags.outputs.IMAGETAG }}
           labels: ${{ steps.metadatamanagementservice.outputs.labels }}
-          push: false
+          push: true
