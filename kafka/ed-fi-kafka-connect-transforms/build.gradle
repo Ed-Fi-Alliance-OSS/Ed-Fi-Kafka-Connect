@@ -28,7 +28,7 @@ targetCompatibility = JavaVersion.VERSION_11
 }
 
 ext {
-    kafkaVersion = "2.3.0"
+    kafkaVersion = "3.9.0"
     debeziumVersion = "2.7.0.Final"
 }
 
