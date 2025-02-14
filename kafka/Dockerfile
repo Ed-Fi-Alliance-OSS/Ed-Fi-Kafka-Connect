@@ -3,7 +3,7 @@
 # The Ed-Fi Alliance licenses this file to you under the Apache License, Version 2.0.
 # See the LICENSE and NOTICES files in the project root for more information.
 
-FROM gradle:8.2.1-jdk-focal@sha256:78b95c865c1bcb50ced01501e6a9c6c9bcc181be93c1ea723ff4b58b2f7e9a96 AS build
+FROM gradle:8.2.1-jdk-focal@sha256:89b352a0d0d40bb7294cbe5ffd4d9a8824cac6174f9ecc786c0d53ef4663863f AS build
 COPY --chown=gradle:gradle /ed-fi-kafka-connect-transforms /home/gradle/src
 WORKDIR /home/gradle/src
 RUN gradle installDist --no-daemon
