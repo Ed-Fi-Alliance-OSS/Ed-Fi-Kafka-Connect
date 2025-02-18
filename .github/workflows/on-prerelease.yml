@@ -84,7 +84,6 @@ jobs:
         shell: pwsh
     needs: pack
     permissions:
-      actions: read
       contents: write
       attestations: write
       id-token: write
@@ -110,7 +109,6 @@ jobs:
     name: Create Provenance
     needs: pack
     permissions:
-      actions: read
       id-token: write
       contents: write      
     uses: Ed-Fi-Alliance-OSS/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@main
