@@ -47,7 +47,11 @@ RUN tar -xvf ${opensearch} && \
 RUN tar -xvf ${elasticsearch} && \
     rm ${elasticsearch}
 
+# Named context support https://github.com/hadolint/hadolint/issues/830
+# hadolint ignore=DL3022
 COPY --from=parentdir LICENSE /kafka/connect/EDFI_LICENSE
+# Named context support https://github.com/hadolint/hadolint/issues/830
+# hadolint ignore=DL3022
 COPY --from=parentdir NOTICES.md /kafka/connect/EDFI_NOTICES.md
 
 COPY --from=build /home/gradle/src/build/libs /kafka/connect/ed-fi-kafka-connect-transforms
