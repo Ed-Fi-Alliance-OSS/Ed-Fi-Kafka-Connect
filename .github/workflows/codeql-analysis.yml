@@ -20,6 +20,9 @@ jobs:
     defaults:
       run:
         working-directory: kafka/ed-fi-kafka-connect-transforms
+    permissions:
+      # Needed to upload the results to code-scanning dashboard.
+      security-events: write
     
     steps:
     - name: Checkout the Repo
