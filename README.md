@@ -70,7 +70,7 @@ This project includes a series of *gradle* tasks:
 
 ## Build container
 
-To build the container with a dev tag, simply run `docker build -t edfialliance/ed-fi-kafka-connect:dev .` from the `kafka` directory.
+To build the container with a dev tag, simply run `docker build -t edfialliance/ed-fi-kafka-connect:dev --build-context parentdir=../  .` from the `kafka` directory.
 
 ## Legal Information
 
