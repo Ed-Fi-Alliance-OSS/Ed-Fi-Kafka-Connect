@@ -11,6 +11,8 @@ on:
   pull_request:
     branches: [ "main" ]
 
+permissions: read-all
+
 jobs:
   code-analysis:
     name: Code Analysis
@@ -18,8 +20,7 @@ jobs:
     defaults:
       run:
         working-directory: kafka/ed-fi-kafka-connect-transforms
-    permissions: read-all
-
+    
     steps:
     - name: Checkout the Repo
       uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
