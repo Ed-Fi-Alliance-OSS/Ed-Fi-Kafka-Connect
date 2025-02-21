@@ -19,12 +19,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: write
+permissions: read-all
 
 jobs:
   dependency-submission:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     defaults:
       run:
         working-directory: kafka/ed-fi-kafka-connect-transforms
