@@ -35,6 +35,22 @@ transforms=DebeziumDeletedToTombstone
 transforms.DebeziumDeletedToTombstone.type=org.edfi.kafka.connect.transforms.DebeziumDeletedToTombstone
 ```
 
+### `ExpandJson`
+
+This transformation expands one or more configured top-level fields whose value is a JSON-object
+string into a structured value, so downstream consumers receive real nested JSON instead of an
+escaped string. The fields to expand are listed in the `sourceFields` config. A configured field
+that is absent or null is left unchanged; a field whose value is not a JSON object (invalid JSON, a
+JSON array, or a scalar) fails fast with a `DataException`.
+
+Example of this transformation configuration:
+
+```properties
+transforms=ExpandJson
+transforms.ExpandJson.type=org.edfi.kafka.connect.transforms.ExpandJson$Value
+transforms.ExpandJson.sourceFields=DocumentJson
+```
+
 
 ## Running transformations
 
