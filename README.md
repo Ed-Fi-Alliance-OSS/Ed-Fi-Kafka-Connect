@@ -40,21 +40,24 @@ transforms.DebeziumDeletedToTombstone.type=org.edfi.kafka.connect.transforms.Deb
 This transformation expands one or more configured top-level fields whose value is a JSON-object
 string into a structured value, so downstream consumers receive real nested JSON instead of an
 escaped string. The fields to expand are listed in the `sourceFields` config, which is **required
-and must list at least one field** — a missing or empty `sourceFields` fails fast with a
-`ConfigException` at startup rather than silently passing records through unchanged. A configured
-field that is absent or null is left unchanged; a field whose value is not a JSON object (invalid
-JSON, a JSON array, or a scalar) fails fast with a `DataException`.
+and must list at least one non-blank field** — a missing or empty `sourceFields`, or one
+containing a blank entry (e.g. `a,,b`), fails fast with a `ConfigException` at startup rather
+than silently passing records through unchanged. Entries are trimmed of surrounding whitespace. A
+configured field that is absent or null is left unchanged; a field whose value is not a JSON
+object (invalid JSON, a JSON array, or a scalar) fails fast with a `DataException`.
 
 Both record shapes are supported:
 
-- **Schemaless (Map) records** — the shape produced in the DMS pipeline, where the JSON converter
-  runs with `schemas.enable=false`. This is also required by the downstream
-  `RenameDmsTopicToOpenSearchIndex` and `DebeziumDeletedToTombstone` transforms, which both operate
-  on a Map `record.value()`. Expanded fields become nested `Map`s.
+- **Schemaless (Map) records** — for example, records a sink connector's JSON converter has
+  deserialized with `schemas.enable=false`. Expanded fields become nested `Map`s, and numbers keep
+  their exact parsed values.
 - **Schema-backed (Struct) records** — the value schema is rebuilt (preserving the root schema's
   name, version, doc, parameters, and optionality) with the expanded fields typed as inferred
   structs/arrays. A struct-level default value is not carried over, since it is bound to the
-  original (pre-expansion) field schemas.
+  original (pre-expansion) field schemas. Numbers are typed by inference: integral values map to
+  INT64 and fail fast with a `DataException` if they do not fit a signed 64-bit long; decimal
+  values (and arrays mixing integral and decimal values) map to FLOAT64, rounding to the nearest
+  IEEE 754 double.
 
 Example of this transformation configuration:
 
@@ -70,7 +73,10 @@ transforms.ExpandJson.sourceFields=DocumentJson
 ### Prerequisites
 
 - Install JDK 17. Source/target compatibility and CI both use Java 17, and the
-  transforms are built against it.
+  transforms are built against it. The jar therefore contains Java 17 bytecode and
+  **requires a Java 17+ runtime**: the shipped Docker image (built on
+  `debezium/connect`, which runs JDK 21) satisfies this, but the jar will not load
+  on a Kafka Connect deployment still running Java 11.
 - Install, if you don't have it, Gradle 8.10 according to the
   [installation guide](https://gradle.org/install/). CI pins Gradle 8.10; the
   Docker build stage uses Gradle 8.2.1.
