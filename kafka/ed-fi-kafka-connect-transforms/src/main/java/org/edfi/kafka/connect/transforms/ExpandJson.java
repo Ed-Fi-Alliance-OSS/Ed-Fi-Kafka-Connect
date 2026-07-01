@@ -5,6 +5,7 @@
 
 package org.edfi.kafka.connect.transforms;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -27,17 +28,23 @@ public abstract class ExpandJson<R extends ConnectRecord<R>> implements Transfor
 
     public static final String SOURCE_FIELDS_CONFIG = "sourceFields";
 
-    // Rejects a missing or empty list so a misconfigured (or misspelled) sourceFields fails fast
-    // at configure time instead of silently passing every record through unchanged.
-    private static final ConfigDef.Validator NON_EMPTY_LIST = (name, value) -> {
+    // Rejects a missing or empty list, and any blank entry (e.g. "a,,b"), so a misconfigured
+    // sourceFields fails fast at configure time instead of silently passing records through
+    // unchanged.
+    private static final ConfigDef.Validator NON_BLANK_FIELD_LIST = (name, value) -> {
         if (!(value instanceof List) || ((List<?>) value).isEmpty()) {
             throw new ConfigException(name, value, "must list at least one field to expand");
+        }
+        for (final Object field : (List<?>) value) {
+            if (!(field instanceof String) || ((String) field).trim().isEmpty()) {
+                throw new ConfigException(name, value, "must not contain blank field names");
+            }
         }
     };
 
     public static final ConfigDef CONFIG_DEF = new ConfigDef()
             .define(SOURCE_FIELDS_CONFIG, ConfigDef.Type.LIST, ConfigDef.NO_DEFAULT_VALUE,
-                    NON_EMPTY_LIST, ConfigDef.Importance.HIGH,
+                    NON_BLANK_FIELD_LIST, ConfigDef.Importance.HIGH,
                     "Top-level string fields whose JSON-object value is expanded into a structured value.");
 
     private List<String> sourceFields;
@@ -49,7 +56,14 @@ public abstract class ExpandJson<R extends ConnectRecord<R>> implements Transfor
 
     @Override
     public void configure(final Map<String, ?> configs) {
-        this.sourceFields = new AbstractConfig(CONFIG_DEF, configs).getList(SOURCE_FIELDS_CONFIG);
+        // Trim entries: ConfigDef's comma splitting already strips whitespace around string-config
+        // entries, but a List passed programmatically bypasses that split.
+        final List<String> configured = new AbstractConfig(CONFIG_DEF, configs).getList(SOURCE_FIELDS_CONFIG);
+        final List<String> trimmed = new ArrayList<>(configured.size());
+        for (final String field : configured) {
+            trimmed.add(field.trim());
+        }
+        this.sourceFields = trimmed;
     }
 
     @Override
@@ -76,13 +90,21 @@ public abstract class ExpandJson<R extends ConnectRecord<R>> implements Transfor
         }
         @SuppressWarnings("unchecked")
         final Map<String, Object> original = (Map<String, Object>) value;
-        final Map<String, Object> updated = new LinkedHashMap<>(original);
+        // Copy lazily so a record where no configured field expands is returned unchanged,
+        // matching the schema-backed path.
+        Map<String, Object> updated = null;
         for (final String field : sourceFields) {
             final Object fieldValue = original.get(field);
             if (fieldValue == null) {
                 continue;
             }
+            if (updated == null) {
+                updated = new LinkedHashMap<>(original);
+            }
             updated.put(field, JsonExpander.expandToMap(field, requireString(field, fieldValue)));
+        }
+        if (updated == null) {
+            return record;
         }
         return newRecord(record, null, updated);
     }

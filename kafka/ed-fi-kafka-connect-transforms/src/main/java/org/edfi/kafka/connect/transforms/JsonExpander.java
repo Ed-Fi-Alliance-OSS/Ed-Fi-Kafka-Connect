@@ -135,6 +135,9 @@ final class JsonExpander {
         return schema.type() == Schema.Type.INT64 || schema.type() == Schema.Type.FLOAT64;
     }
 
+    // Numeric contract: integral numbers map to INT64 (values outside the signed 64-bit range
+    // fail fast in toInt64); all other numbers map to FLOAT64, rounded to the nearest IEEE 754
+    // double.
     private static Schema scalarSchema(final JsonNode scalar) {
         if (scalar.isBoolean()) {
             return Schema.OPTIONAL_BOOLEAN_SCHEMA;
@@ -185,7 +188,7 @@ final class JsonExpander {
             case ARRAY:
                 return toArray(node, schema);
             case INT64:
-                return node.asLong();
+                return toInt64(node);
             case FLOAT64:
                 return node.asDouble();
             case BOOLEAN:
@@ -193,6 +196,18 @@ final class JsonExpander {
             default:
                 return node.asText();
         }
+    }
+
+    // Guards the INT64 mapping: Jackson's asLong() silently wraps an integral value outside the
+    // signed 64-bit range (e.g. 9223372036854775808 becomes Long.MIN_VALUE), which would corrupt
+    // data. Fail fast instead. (The schemaless path is unaffected: it keeps Jackson's exact
+    // numeric types, so such values stay lossless BigIntegers.)
+    private static long toInt64(final JsonNode node) {
+        if (!node.canConvertToLong()) {
+            throw new DataException("ExpandJson cannot expand integral number " + node.asText()
+                    + " because it does not fit in a Connect INT64 (signed 64-bit long)");
+        }
+        return node.asLong();
     }
 
     private static Struct toStruct(final JsonNode node, final Schema schema) {

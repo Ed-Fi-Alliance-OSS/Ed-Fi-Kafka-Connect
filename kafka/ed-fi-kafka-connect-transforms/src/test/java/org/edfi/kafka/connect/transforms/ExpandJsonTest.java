@@ -5,6 +5,7 @@
 
 package org.edfi.kafka.connect.transforms;
 
+import java.math.BigInteger;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -72,6 +73,34 @@ class ExpandJsonTest {
     }
 
     @Test
+    void Given_Empty_String_SourceFields_Entry_Should_Throw_ConfigException() {
+        assertThatThrownBy(() -> transform("")).isInstanceOf(ConfigException.class);
+    }
+
+    @Test
+    void Given_Whitespace_SourceFields_Entry_Should_Throw_ConfigException() {
+        assertThatThrownBy(() -> transform("payload", " ")).isInstanceOf(ConfigException.class);
+    }
+
+    @Test
+    void Given_String_Config_With_Empty_Entry_Should_Throw_ConfigException() {
+        final ExpandJson<SinkRecord> smt = new ExpandJson.Value<>();
+        final Map<String, Object> config = new HashMap<>();
+        config.put(ExpandJson.SOURCE_FIELDS_CONFIG, "payload,,other");
+        assertThatThrownBy(() -> smt.configure(config)).isInstanceOf(ConfigException.class);
+    }
+
+    @Test
+    void Given_SourceFields_Entry_With_Whitespace_Should_Be_Trimmed() {
+        final Map<String, Object> value = new HashMap<>();
+        value.put("payload", "{\"a\":1}");
+
+        final Map<String, Object> out = valueAsMap(transform(" payload ").apply(schemalessRecord(value)));
+
+        assertThat(out.get("payload")).isEqualTo(Map.of("a", 1));
+    }
+
+    @Test
     void Given_Schemaless_Json_Object_Field_Should_Expand() {
         final Map<String, Object> value = new HashMap<>();
         value.put("payload", "{\"a\":1,\"b\":\"x\"}");
@@ -134,7 +163,7 @@ class ExpandJsonTest {
 
         final SinkRecord result = transform("payload").apply(schemalessRecord(value));
 
-        assertThat(result.value()).isEqualTo(value);
+        assertThat(result.value()).isSameAs(value);
     }
 
     @Test
@@ -144,7 +173,7 @@ class ExpandJsonTest {
 
         final SinkRecord result = transform("payload").apply(schemalessRecord(value));
 
-        assertThat(result.value()).isEqualTo(value);
+        assertThat(result.value()).isSameAs(value);
     }
 
     @Test
@@ -327,6 +356,62 @@ class ExpandJsonTest {
         final Struct payload = (Struct) out.get("payload");
         assertThat(payload.get("b")).isEqualTo(true);
         assertThat(payload.get("d")).isEqualTo(1.5d);
+    }
+
+    @Test
+    void Given_SchemaBacked_Integral_Above_Long_Range_Should_Fail() {
+        final Schema schema = stringSchema("payload");
+        final Struct value = new Struct(schema).put("payload", "{\"n\":9223372036854775808}");
+
+        assertThatThrownBy(() -> transform("payload").apply(schemaRecord(schema, value)))
+                .isInstanceOf(DataException.class)
+                .hasMessageContaining("9223372036854775808");
+    }
+
+    @Test
+    void Given_SchemaBacked_Integral_Below_Long_Range_Should_Fail() {
+        final Schema schema = stringSchema("payload");
+        final Struct value = new Struct(schema).put("payload", "{\"n\":-9223372036854775809}");
+
+        assertThatThrownBy(() -> transform("payload").apply(schemaRecord(schema, value)))
+                .isInstanceOf(DataException.class);
+    }
+
+    @Test
+    void Given_SchemaBacked_Long_Boundary_Values_Should_Expand_Exactly() {
+        final Schema schema = stringSchema("payload");
+        final Struct value = new Struct(schema)
+                .put("payload", "{\"max\":9223372036854775807,\"min\":-9223372036854775808}");
+
+        final Struct out = (Struct) transform("payload").apply(schemaRecord(schema, value)).value();
+
+        final Struct payload = (Struct) out.get("payload");
+        assertThat(payload.get("max")).isEqualTo(Long.MAX_VALUE);
+        assertThat(payload.get("min")).isEqualTo(Long.MIN_VALUE);
+    }
+
+    @Test
+    void Given_SchemaBacked_High_Precision_Decimal_Should_Round_To_Nearest_Double() {
+        // Documents the numeric contract: decimals map to FLOAT64 (IEEE 754 double), so precision
+        // beyond a double is rounded, not preserved and not an error.
+        final Schema schema = stringSchema("payload");
+        final Struct value = new Struct(schema).put("payload", "{\"d\":0.10000000000000000000001}");
+
+        final Struct out = (Struct) transform("payload").apply(schemaRecord(schema, value)).value();
+
+        assertThat(((Struct) out.get("payload")).get("d")).isEqualTo(0.1d);
+    }
+
+    @Test
+    void Given_Schemaless_Integral_Above_Long_Range_Should_Preserve_Exact_Value() {
+        // Documents the numeric contract: the schemaless path keeps Jackson's exact numeric types,
+        // so an integral value beyond long range stays a lossless BigInteger.
+        final Map<String, Object> value = new HashMap<>();
+        value.put("payload", "{\"n\":9223372036854775808}");
+
+        final Map<String, Object> out = valueAsMap(transform("payload").apply(schemalessRecord(value)));
+
+        assertThat(out.get("payload")).isEqualTo(Map.of("n", new BigInteger("9223372036854775808")));
     }
 
     @Test
