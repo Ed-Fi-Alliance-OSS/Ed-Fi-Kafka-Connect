@@ -5,13 +5,13 @@
 
 package org.edfi.kafka.connect.transforms;
 
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 import org.apache.kafka.common.config.AbstractConfig;
 import org.apache.kafka.common.config.ConfigDef;
+import org.apache.kafka.common.config.ConfigException;
 import org.apache.kafka.connect.connector.ConnectRecord;
 import org.apache.kafka.connect.data.Field;
 import org.apache.kafka.connect.data.Schema;
@@ -27,9 +27,17 @@ public abstract class ExpandJson<R extends ConnectRecord<R>> implements Transfor
 
     public static final String SOURCE_FIELDS_CONFIG = "sourceFields";
 
+    // Rejects a missing or empty list so a misconfigured (or misspelled) sourceFields fails fast
+    // at configure time instead of silently passing every record through unchanged.
+    private static final ConfigDef.Validator NON_EMPTY_LIST = (name, value) -> {
+        if (!(value instanceof List) || ((List<?>) value).isEmpty()) {
+            throw new ConfigException(name, value, "must list at least one field to expand");
+        }
+    };
+
     public static final ConfigDef CONFIG_DEF = new ConfigDef()
-            .define(SOURCE_FIELDS_CONFIG, ConfigDef.Type.LIST, Collections.emptyList(),
-                    ConfigDef.Importance.HIGH,
+            .define(SOURCE_FIELDS_CONFIG, ConfigDef.Type.LIST, ConfigDef.NO_DEFAULT_VALUE,
+                    NON_EMPTY_LIST, ConfigDef.Importance.HIGH,
                     "Top-level string fields whose JSON-object value is expanded into a structured value.");
 
     private List<String> sourceFields;
@@ -47,7 +55,7 @@ public abstract class ExpandJson<R extends ConnectRecord<R>> implements Transfor
     @Override
     public R apply(final R record) {
         final Object value = operatingValue(record);
-        if (value == null || sourceFields.isEmpty()) {
+        if (value == null) {
             return record;
         }
         if (operatingSchema(record) == null) {
@@ -126,12 +134,26 @@ public abstract class ExpandJson<R extends ConnectRecord<R>> implements Transfor
         if (original.name() != null) {
             builder.name(original.name());
         }
+        if (original.version() != null) {
+            builder.version(original.version());
+        }
+        if (original.doc() != null) {
+            builder.doc(original.doc());
+        }
+        if (original.parameters() != null) {
+            builder.parameters(original.parameters());
+        }
         if (original.isOptional()) {
             builder.optional();
         }
         for (final Field field : original.fields()) {
             final SchemaAndValue expanded = expansions.get(field.name());
             builder.field(field.name(), expanded == null ? field.schema() : expanded.schema());
+        }
+        // Set the default value only after the fields exist so Connect can validate it against the
+        // full struct; root Debezium value schemas normally carry no struct-level default.
+        if (original.defaultValue() != null) {
+            builder.defaultValue(original.defaultValue());
         }
         return builder.build();
     }

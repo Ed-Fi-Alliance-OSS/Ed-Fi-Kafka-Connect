@@ -5,12 +5,12 @@
 
 package org.edfi.kafka.connect.transforms;
 
-import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.kafka.common.config.ConfigException;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.data.Struct;
@@ -18,6 +18,8 @@ import org.apache.kafka.connect.errors.DataException;
 import org.apache.kafka.connect.json.JsonConverter;
 import org.apache.kafka.connect.sink.SinkRecord;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -59,11 +61,14 @@ class ExpandJsonTest {
     }
 
     @Test
-    void Given_Empty_SourceFields_Should_Leave_Record_Unchanged() {
-        final Map<String, Object> value = new HashMap<>();
-        value.put("payload", "{\"a\":1}");
-        final SinkRecord result = transform().apply(schemalessRecord(value));
-        assertThat(result.value()).isEqualTo(value);
+    void Given_Empty_SourceFields_Should_Throw_ConfigException() {
+        assertThatThrownBy(() -> transform()).isInstanceOf(ConfigException.class);
+    }
+
+    @Test
+    void Given_Missing_SourceFields_Should_Throw_ConfigException() {
+        final ExpandJson<SinkRecord> smt = new ExpandJson.Value<>();
+        assertThatThrownBy(() -> smt.configure(new HashMap<>())).isInstanceOf(ConfigException.class);
     }
 
     @Test
@@ -217,6 +222,25 @@ class ExpandJsonTest {
     }
 
     @Test
+    void Given_SchemaBacked_Root_Schema_Metadata_Should_Be_Preserved() {
+        final Schema schema = SchemaBuilder.struct()
+                .name("org.edfi.Envelope")
+                .version(3)
+                .doc("root doc")
+                .parameter("connect.origin", "dms")
+                .field("payload", Schema.STRING_SCHEMA)
+                .build();
+        final Struct value = new Struct(schema).put("payload", "{\"a\":1}");
+
+        final Schema out = transform("payload").apply(schemaRecord(schema, value)).valueSchema();
+
+        assertThat(out.name()).isEqualTo("org.edfi.Envelope");
+        assertThat(out.version()).isEqualTo(3);
+        assertThat(out.doc()).isEqualTo("root doc");
+        assertThat(out.parameters()).containsEntry("connect.origin", "dms");
+    }
+
+    @Test
     void Given_SchemaBacked_Nested_Object_Should_Expand() {
         final Schema schema = stringSchema("payload");
         final Struct value = new Struct(schema).put("payload", "{\"a\":{\"b\":1}}");
@@ -286,6 +310,33 @@ class ExpandJsonTest {
         final Struct payload = (Struct) out.get("payload");
         assertThat(payload.get("b")).isEqualTo(true);
         assertThat(payload.get("d")).isEqualTo(1.5d);
+    }
+
+    @Test
+    void Given_SchemaBacked_Mixed_Numeric_Array_Should_Promote_To_Double() {
+        final Schema schema = stringSchema("payload");
+        final Struct value = new Struct(schema).put("payload", "{\"arr\":[1,2.5]}");
+
+        final Struct out = (Struct) transform("payload").apply(schemaRecord(schema, value)).value();
+
+        final Struct payload = (Struct) out.get("payload");
+        assertThat(payload.schema().field("arr").schema().valueSchema().type()).isEqualTo(Schema.Type.FLOAT64);
+        assertThat(payload.get("arr")).isEqualTo(List.of(1.0d, 2.5d));
+    }
+
+    @Test
+    void Given_SchemaBacked_Object_Array_Mixed_Numeric_Field_Should_Promote_To_Double() {
+        final Schema schema = stringSchema("payload");
+        final Struct value = new Struct(schema).put("payload", "{\"arr\":[{\"score\":1},{\"score\":2.5}]}");
+
+        final Struct out = (Struct) transform("payload").apply(schemaRecord(schema, value)).value();
+
+        final List<?> arr = (List<?>) ((Struct) out.get("payload")).get("arr");
+        final Struct first = (Struct) arr.get(0);
+        final Struct second = (Struct) arr.get(1);
+        assertThat(first.schema().field("score").schema().type()).isEqualTo(Schema.Type.FLOAT64);
+        assertThat(first.get("score")).isEqualTo(1.0d);
+        assertThat(second.get("score")).isEqualTo(2.5d);
     }
 
     @Test
@@ -394,18 +445,33 @@ class ExpandJsonTest {
     }
 
     @Test
-    void Given_SchemaBacked_Output_Serialized_Without_Schemas_Should_Be_Structured() {
-        final Schema schema = stringSchema("payload");
-        final Struct value = new Struct(schema).put("payload", "{\"a\":1,\"b\":\"x\"}");
+    void Given_SchemaBacked_Output_Serialized_Without_Schemas_Should_Be_Structured() throws Exception {
+        final Schema schema = SchemaBuilder.struct()
+                .field("payload", Schema.STRING_SCHEMA)
+                .field("other", Schema.OPTIONAL_STRING_SCHEMA)
+                .build();
+        final Struct value = new Struct(schema)
+                .put("payload", "{\"a\":1,\"b\":\"x\",\"c\":{\"d\":true},\"e\":[1,2]}")
+                .put("other", "keep");
         final SinkRecord result = transform("payload").apply(schemaRecord(schema, value));
 
         final JsonConverter converter = new JsonConverter();
         converter.configure(Map.of("schemas.enable", "false"), false);
         final byte[] bytes = converter.fromConnectData(TOPIC, result.valueSchema(), result.value());
-        final String json = new String(bytes, StandardCharsets.UTF_8);
 
-        // The expanded field is real nested JSON, not an escaped JSON string.
-        assertThat(json).contains("\"payload\":{");
-        assertThat(json).doesNotContain("\\\"");
+        // Parse the serialized bytes: the expanded field must be a real nested JSON object with
+        // the correct nested values, not an escaped JSON string.
+        final JsonNode root = new ObjectMapper().readTree(bytes);
+        final JsonNode payload = root.get("payload");
+        assertThat(payload.isObject()).isTrue();
+        assertThat(payload.get("a").isNumber()).isTrue();
+        assertThat(payload.get("a").asLong()).isEqualTo(1L);
+        assertThat(payload.get("b").asText()).isEqualTo("x");
+        assertThat(payload.get("c").isObject()).isTrue();
+        assertThat(payload.get("c").get("d").asBoolean()).isTrue();
+        assertThat(payload.get("e").isArray()).isTrue();
+        assertThat(payload.get("e").get(0).asLong()).isEqualTo(1L);
+        assertThat(payload.get("e").get(1).asLong()).isEqualTo(2L);
+        assertThat(root.get("other").asText()).isEqualTo("keep");
     }
 }

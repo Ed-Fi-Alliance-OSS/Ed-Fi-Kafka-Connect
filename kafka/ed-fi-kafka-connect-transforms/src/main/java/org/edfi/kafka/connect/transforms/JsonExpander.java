@@ -112,14 +112,27 @@ final class JsonExpander {
     private static Schema scalarSchemaOf(final List<JsonNode> scalars) {
         Schema merged = null;
         for (final JsonNode scalar : scalars) {
-            final Schema current = scalarSchema(scalar);
-            if (merged != null && merged.type() != current.type()) {
-                throw new DataException("ExpandJson cannot expand a JSON array with mixed scalar types: "
-                        + merged.type() + " and " + current.type());
-            }
-            merged = current;
+            merged = mergeScalar(merged, scalarSchema(scalar));
         }
         return merged;
+    }
+
+    // Merges the scalar schemas inferred from different samples of the same field or array element.
+    // Integral and decimal numbers are compatible: a mix (e.g. [1, 2.5]) promotes to FLOAT64.
+    // Any other type mismatch (e.g. number vs string) fails fast.
+    private static Schema mergeScalar(final Schema merged, final Schema current) {
+        if (merged == null || merged.type() == current.type()) {
+            return current;
+        }
+        if (isNumeric(merged) && isNumeric(current)) {
+            return Schema.OPTIONAL_FLOAT64_SCHEMA;
+        }
+        throw new DataException("ExpandJson cannot expand a JSON array with mixed scalar types: "
+                + merged.type() + " and " + current.type());
+    }
+
+    private static boolean isNumeric(final Schema schema) {
+        return schema.type() == Schema.Type.INT64 || schema.type() == Schema.Type.FLOAT64;
     }
 
     private static Schema scalarSchema(final JsonNode scalar) {
