@@ -39,9 +39,21 @@ transforms.DebeziumDeletedToTombstone.type=org.edfi.kafka.connect.transforms.Deb
 
 This transformation expands one or more configured top-level fields whose value is a JSON-object
 string into a structured value, so downstream consumers receive real nested JSON instead of an
-escaped string. The fields to expand are listed in the `sourceFields` config. A configured field
-that is absent or null is left unchanged; a field whose value is not a JSON object (invalid JSON, a
-JSON array, or a scalar) fails fast with a `DataException`.
+escaped string. The fields to expand are listed in the `sourceFields` config, which is **required
+and must list at least one field** — a missing or empty `sourceFields` fails fast with a
+`ConfigException` at startup rather than silently passing records through unchanged. A configured
+field that is absent or null is left unchanged; a field whose value is not a JSON object (invalid
+JSON, a JSON array, or a scalar) fails fast with a `DataException`.
+
+Both record shapes are supported:
+
+- **Schemaless (Map) records** — the shape produced in the DMS pipeline, where the JSON converter
+  runs with `schemas.enable=false`. This is also required by the downstream
+  `RenameDmsTopicToOpenSearchIndex` and `DebeziumDeletedToTombstone` transforms, which both operate
+  on a Map `record.value()`. Expanded fields become nested `Map`s.
+- **Schema-backed (Struct) records** — the value schema is rebuilt (preserving the root schema's
+  name, version, doc, parameters, optionality, and default value) with the expanded fields typed as
+  inferred structs/arrays.
 
 Example of this transformation configuration:
 
@@ -56,14 +68,17 @@ transforms.ExpandJson.sourceFields=DocumentJson
 
 ### Prerequisites
 
-- Install, if you don't have it, gradle version 7.2.4 according to the
-  [installation guide](https://gradle.org/install/)
+- Install JDK 17. Source/target compatibility and CI both use Java 17, and the
+  transforms are built against it.
+- Install, if you don't have it, Gradle 8.10 according to the
+  [installation guide](https://gradle.org/install/). CI pins Gradle 8.10; the
+  Docker build stage uses Gradle 8.2.1.
 - To verify your installation, open a console (or a Windows command prompt) and
 run gradle -v to run gradle and display the version, e.g.: `> gradle -v` Result:
 
 ```none
 ------------------------------------------------------------
-Gradle 7.2.4
+Gradle 8.10
 ------------------------------------------------------------
 ```
 
