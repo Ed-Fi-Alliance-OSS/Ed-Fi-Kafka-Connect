@@ -23,13 +23,16 @@ repositories {
 }
 
 java {
-sourceCompatibility = JavaVersion.VERSION_11
-targetCompatibility = JavaVersion.VERSION_11
+sourceCompatibility = JavaVersion.VERSION_17
+targetCompatibility = JavaVersion.VERSION_17
 }
 
 ext {
     kafkaVersion = "3.9.0"
     debeziumVersion = "2.7.0.Final"
+    // Match the Jackson version already shipped in the Debezium/Connect runtime image
+    // so the transform relies on the runtime's Jackson (compileOnly) and bundles nothing.
+    jacksonVersion = "2.16.0"
 }
 
 distributions {
@@ -70,6 +73,8 @@ sourceSets {
 dependencies {
     compileOnly "org.apache.kafka:connect-api:$kafkaVersion"
     compileOnly "io.debezium:debezium-api:$debeziumVersion"
+    // Jackson is provided by the Connect runtime; compile against it but do not bundle it.
+    compileOnly "com.fasterxml.jackson.core:jackson-databind:$jacksonVersion"
 
     implementation "org.slf4j:slf4j-api:1.7.36"
 
@@ -77,6 +82,10 @@ dependencies {
     testImplementation "org.apache.kafka:connect-api:$kafkaVersion"
     testImplementation "io.debezium:debezium-api:$debeziumVersion"
     testImplementation "org.assertj:assertj-core:3.24.2"
+    // Test runtime needs Jackson (compileOnly above is not on the test classpath) and
+    // connect-json for the JsonConverter round-trip that verifies the serialized shape.
+    testImplementation "com.fasterxml.jackson.core:jackson-databind:$jacksonVersion"
+    testImplementation "org.apache.kafka:connect-json:$kafkaVersion"
 
     testRuntimeOnly "org.apache.logging.log4j:log4j-slf4j-impl:2.20.0"
     testRuntimeOnly "org.apache.logging.log4j:log4j-api:2.20.0"

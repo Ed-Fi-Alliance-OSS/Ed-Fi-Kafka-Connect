@@ -1,0 +1,177 @@
+// SPDX-License-Identifier: Apache-2.0
+// Licensed to the Ed-Fi Alliance under one or more agreements.
+// The Ed-Fi Alliance licenses this file to you under the Apache License, Version 2.0.
+// See the LICENSE and NOTICES files in the project root for more information.
+
+package org.edfi.kafka.connect.transforms;
+
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+import org.apache.kafka.common.config.AbstractConfig;
+import org.apache.kafka.common.config.ConfigDef;
+import org.apache.kafka.connect.connector.ConnectRecord;
+import org.apache.kafka.connect.data.Field;
+import org.apache.kafka.connect.data.Schema;
+import org.apache.kafka.connect.data.SchemaAndValue;
+import org.apache.kafka.connect.data.SchemaBuilder;
+import org.apache.kafka.connect.data.Struct;
+import org.apache.kafka.connect.errors.DataException;
+import org.apache.kafka.connect.transforms.Transformation;
+
+// Expands configured top-level string fields whose value is a JSON object into a structured
+// Connect value. Generic: it knows nothing about any specific table or column.
+public abstract class ExpandJson<R extends ConnectRecord<R>> implements Transformation<R> {
+
+    public static final String SOURCE_FIELDS_CONFIG = "sourceFields";
+
+    public static final ConfigDef CONFIG_DEF = new ConfigDef()
+            .define(SOURCE_FIELDS_CONFIG, ConfigDef.Type.LIST, Collections.emptyList(),
+                    ConfigDef.Importance.HIGH,
+                    "Top-level string fields whose JSON-object value is expanded into a structured value.");
+
+    private List<String> sourceFields;
+
+    @Override
+    public ConfigDef config() {
+        return CONFIG_DEF;
+    }
+
+    @Override
+    public void configure(final Map<String, ?> configs) {
+        this.sourceFields = new AbstractConfig(CONFIG_DEF, configs).getList(SOURCE_FIELDS_CONFIG);
+    }
+
+    @Override
+    public R apply(final R record) {
+        final Object value = operatingValue(record);
+        if (value == null || sourceFields.isEmpty()) {
+            return record;
+        }
+        if (operatingSchema(record) == null) {
+            return applySchemaless(record, value);
+        }
+        return applyWithSchema(record, operatingSchema(record), value);
+    }
+
+    @Override
+    public void close() {
+    }
+
+    private R applySchemaless(final R record, final Object value) {
+        if (!(value instanceof Map)) {
+            throw new DataException(
+                    "ExpandJson requires a Map value when the record has no schema, but found: "
+                            + value.getClass().getName());
+        }
+        @SuppressWarnings("unchecked")
+        final Map<String, Object> original = (Map<String, Object>) value;
+        final Map<String, Object> updated = new LinkedHashMap<>(original);
+        for (final String field : sourceFields) {
+            final Object fieldValue = original.get(field);
+            if (fieldValue == null) {
+                continue;
+            }
+            updated.put(field, JsonExpander.expandToMap(field, requireString(field, fieldValue)));
+        }
+        return newRecord(record, null, updated);
+    }
+
+    private R applyWithSchema(final R record, final Schema schema, final Object value) {
+        if (!(value instanceof Struct)) {
+            throw new DataException(
+                    "ExpandJson requires a Struct value when the record has a schema, but found: "
+                            + value.getClass().getName());
+        }
+        final Struct original = (Struct) value;
+        final Map<String, SchemaAndValue> expansions = new LinkedHashMap<>();
+        for (final String field : sourceFields) {
+            final Field existing = schema.field(field);
+            if (existing == null) {
+                continue;
+            }
+            final Object fieldValue = original.get(field);
+            if (fieldValue == null) {
+                continue;
+            }
+            expansions.put(field, JsonExpander.expandToStruct(field, requireStringField(field, existing, fieldValue)));
+        }
+        if (expansions.isEmpty()) {
+            return record;
+        }
+        final Schema updatedSchema = rebuildSchema(schema, expansions);
+        return newRecord(record, updatedSchema, rebuildStruct(original, updatedSchema, expansions));
+    }
+
+    private static String requireString(final String field, final Object fieldValue) {
+        if (!(fieldValue instanceof String)) {
+            throw new DataException("ExpandJson field '" + field + "' must be a String, but was: "
+                    + fieldValue.getClass().getName());
+        }
+        return (String) fieldValue;
+    }
+
+    private static String requireStringField(final String field, final Field existing, final Object fieldValue) {
+        if (existing.schema().type() != Schema.Type.STRING || !(fieldValue instanceof String)) {
+            throw new DataException("ExpandJson field '" + field + "' must be a STRING, but was: "
+                    + existing.schema().type());
+        }
+        return (String) fieldValue;
+    }
+
+    private static Schema rebuildSchema(final Schema original, final Map<String, SchemaAndValue> expansions) {
+        final SchemaBuilder builder = SchemaBuilder.struct();
+        if (original.name() != null) {
+            builder.name(original.name());
+        }
+        if (original.isOptional()) {
+            builder.optional();
+        }
+        for (final Field field : original.fields()) {
+            final SchemaAndValue expanded = expansions.get(field.name());
+            builder.field(field.name(), expanded == null ? field.schema() : expanded.schema());
+        }
+        return builder.build();
+    }
+
+    private static Struct rebuildStruct(final Struct original, final Schema updatedSchema,
+            final Map<String, SchemaAndValue> expansions) {
+        final Struct updated = new Struct(updatedSchema);
+        for (final Field field : updatedSchema.fields()) {
+            final SchemaAndValue expanded = expansions.get(field.name());
+            final Object fieldValue = expanded == null ? original.get(field.name()) : expanded.value();
+            if (fieldValue != null) {
+                updated.put(field.name(), fieldValue);
+            }
+        }
+        return updated;
+    }
+
+    protected abstract Schema operatingSchema(R record);
+
+    protected abstract Object operatingValue(R record);
+
+    protected abstract R newRecord(R record, Schema updatedSchema, Object updatedValue);
+
+    // Operates on the value of the record.
+    public static class Value<R extends ConnectRecord<R>> extends ExpandJson<R> {
+
+        @Override
+        protected Schema operatingSchema(final R record) {
+            return record.valueSchema();
+        }
+
+        @Override
+        protected Object operatingValue(final R record) {
+            return record.value();
+        }
+
+        @Override
+        protected R newRecord(final R record, final Schema updatedSchema, final Object updatedValue) {
+            return record.newRecord(record.topic(), record.kafkaPartition(), record.keySchema(), record.key(),
+                    updatedSchema, updatedValue, record.timestamp(), record.headers());
+        }
+    }
+}
