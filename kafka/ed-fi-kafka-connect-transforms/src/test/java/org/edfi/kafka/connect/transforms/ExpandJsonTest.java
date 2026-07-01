@@ -403,6 +403,15 @@ class ExpandJsonTest {
     }
 
     @Test
+    void Given_SchemaBacked_Decimal_Beyond_Double_Range_Should_Fail() {
+        final Schema schema = stringSchema("payload");
+        final Struct value = new Struct(schema).put("payload", "{\"d\":1e999}");
+
+        assertThatThrownBy(() -> transform("payload").apply(schemaRecord(schema, value)))
+                .isInstanceOf(DataException.class);
+    }
+
+    @Test
     void Given_Schemaless_Integral_Above_Long_Range_Should_Preserve_Exact_Value() {
         // Documents the numeric contract: the schemaless path keeps Jackson's exact numeric types,
         // so an integral value beyond long range stays a lossless BigInteger.
@@ -452,6 +461,45 @@ class ExpandJsonTest {
         final SinkRecord result = transform("payload").apply(schemaRecord(schema, value));
 
         assertThat(result.value()).isSameAs(value);
+    }
+
+    @Test
+    void Given_SchemaBacked_Null_Field_With_Blank_Schema_Default_Should_Be_Noop() {
+        // Struct.get substitutes the field schema's default for a null value (e.g. a column
+        // DEFAULT '' propagated by Debezium); a null field must still be skipped, not parsed.
+        final Schema schema = SchemaBuilder.struct()
+                .field("payload", SchemaBuilder.string().optional().defaultValue("").build())
+                .build();
+        final Struct value = new Struct(schema).put("payload", null);
+
+        final SinkRecord result = transform("payload").apply(schemaRecord(schema, value));
+
+        assertThat(result.value()).isSameAs(value);
+    }
+
+    @Test
+    void Given_SchemaBacked_Null_Field_With_Object_Schema_Default_Should_Be_Noop() {
+        final Schema schema = SchemaBuilder.struct()
+                .field("payload", SchemaBuilder.string().optional().defaultValue("{}").build())
+                .build();
+        final Struct value = new Struct(schema).put("payload", null);
+
+        final SinkRecord result = transform("payload").apply(schemaRecord(schema, value));
+
+        assertThat(result.value()).isSameAs(value);
+    }
+
+    @Test
+    void Given_SchemaBacked_Null_Sibling_With_Schema_Default_Should_Stay_Null_After_Expansion() {
+        final Schema schema = SchemaBuilder.struct()
+                .field("payload", Schema.STRING_SCHEMA)
+                .field("status", SchemaBuilder.string().optional().defaultValue("active").build())
+                .build();
+        final Struct value = new Struct(schema).put("payload", "{\"a\":1}").put("status", null);
+
+        final Struct out = (Struct) transform("payload").apply(schemaRecord(schema, value)).value();
+
+        assertThat(out.getWithoutDefault("status")).isNull();
     }
 
     @Test

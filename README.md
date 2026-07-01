@@ -49,15 +49,18 @@ object (invalid JSON, a JSON array, or a scalar) fails fast with a `DataExceptio
 Both record shapes are supported:
 
 - **Schemaless (Map) records** — for example, records a sink connector's JSON converter has
-  deserialized with `schemas.enable=false`. Expanded fields become nested `Map`s, and numbers keep
-  their exact parsed values.
+  deserialized with `schemas.enable=false`. Expanded fields become nested `Map`s. Integral
+  numbers keep their exact parsed values (values beyond a signed 64-bit long stay lossless
+  `BigInteger`s); decimal numbers are parsed as IEEE 754 doubles, rounding to the nearest double
+  just like the schema-backed path.
 - **Schema-backed (Struct) records** — the value schema is rebuilt (preserving the root schema's
   name, version, doc, parameters, and optionality) with the expanded fields typed as inferred
   structs/arrays. A struct-level default value is not carried over, since it is bound to the
   original (pre-expansion) field schemas. Numbers are typed by inference: integral values map to
   INT64 and fail fast with a `DataException` if they do not fit a signed 64-bit long; decimal
   values (and arrays mixing integral and decimal values) map to FLOAT64, rounding to the nearest
-  IEEE 754 double.
+  IEEE 754 double, and fail fast with a `DataException` if they fall outside the finite double
+  range.
 
 Example of this transformation configuration:
 
@@ -66,6 +69,15 @@ transforms=ExpandJson
 transforms.ExpandJson.type=org.edfi.kafka.connect.transforms.ExpandJson$Value
 transforms.ExpandJson.sourceFields=DocumentJson
 ```
+
+> **Migrating from `expandjsonsmt`:** earlier images shipped the RedHat
+> [expandjsonsmt](https://github.com/RedHatInsights/expandjsonsmt) SMT, which this transform
+> replaces. The image no longer contains `com.redhat.insights.expandjsonsmt.ExpandJSON$Value`,
+> so update `transforms.<name>.type` to `org.edfi.kafka.connect.transforms.ExpandJson$Value`.
+> The `sourceFields` config key is unchanged. Unlike the RedHat SMT, this transform fails fast
+> (as described above) on invalid JSON and non-object values instead of logging a warning and
+> passing the record through, and dot-delimited nested paths in `sourceFields` are not
+> supported.
 
 
 ## Running transformations

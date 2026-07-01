@@ -52,8 +52,10 @@ jobs:
           image=$(grep -oP '^FROM \Kdebezium/connect:\S+' kafka/Dockerfile | head -n1)
           echo "SMT bytecode target: Java $target"
           echo "Runtime image:       $image"
+          # "|| true" so an unrecognized version banner reaches the -z diagnostic below instead
+          # of set -e killing the script at this assignment with a bare exit code.
           runtime=$(docker run --rm --entrypoint java "$image" -version 2>&1 \
-            | grep -oiE '(openjdk|java) version "[0-9]+' | grep -oE '[0-9]+$' | head -n1)
+            | grep -oiE '(openjdk|java) version "[0-9]+' | grep -oE '[0-9]+$' | head -n1 || true)
           echo "Runtime JDK major:   $runtime"
           if [ -z "$runtime" ]; then
             echo "::error::Could not determine the runtime JDK version from $image"

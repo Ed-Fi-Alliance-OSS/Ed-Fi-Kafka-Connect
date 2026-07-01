@@ -122,7 +122,10 @@ public abstract class ExpandJson<R extends ConnectRecord<R>> implements Transfor
             if (existing == null) {
                 continue;
             }
-            final Object fieldValue = original.get(field);
+            // getWithoutDefault: Struct.get substitutes the field schema's default for a null
+            // value (e.g. a column DEFAULT propagated by Debezium), which would wrongly expand
+            // a null field instead of leaving it unchanged.
+            final Object fieldValue = original.getWithoutDefault(field);
             if (fieldValue == null) {
                 continue;
             }
@@ -184,7 +187,7 @@ public abstract class ExpandJson<R extends ConnectRecord<R>> implements Transfor
         final Struct updated = new Struct(updatedSchema);
         for (final Field field : updatedSchema.fields()) {
             final SchemaAndValue expanded = expansions.get(field.name());
-            final Object fieldValue = expanded == null ? original.get(field.name()) : expanded.value();
+            final Object fieldValue = expanded == null ? original.getWithoutDefault(field.name()) : expanded.value();
             if (fieldValue != null) {
                 updated.put(field.name(), fieldValue);
             }

@@ -190,7 +190,7 @@ final class JsonExpander {
             case INT64:
                 return toInt64(node);
             case FLOAT64:
-                return node.asDouble();
+                return toFloat64(node);
             case BOOLEAN:
                 return node.asBoolean();
             default:
@@ -208,6 +208,19 @@ final class JsonExpander {
                     + " because it does not fit in a Connect INT64 (signed 64-bit long)");
         }
         return node.asLong();
+    }
+
+    // Guards the FLOAT64 mapping like toInt64 guards INT64: a decimal beyond the finite double
+    // range (e.g. 1e999) parses to Infinity, which is not representable in JSON and would be
+    // silently type-corrupted downstream. Fail fast instead. (Rounding within the finite range
+    // remains the documented contract.)
+    private static double toFloat64(final JsonNode node) {
+        final double value = node.asDouble();
+        if (!Double.isFinite(value)) {
+            throw new DataException("ExpandJson cannot expand number " + node.asText()
+                    + " because it does not fit in a finite Connect FLOAT64 (IEEE 754 double)");
+        }
+        return value;
     }
 
     private static Struct toStruct(final JsonNode node, final Schema schema) {
