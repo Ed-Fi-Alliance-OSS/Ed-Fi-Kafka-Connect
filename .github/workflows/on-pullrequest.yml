@@ -65,6 +65,44 @@ jobs:
           fi
           echo "OK: runtime JDK $runtime can load Java $target bytecode."
 
+  verify-image-plugins:
+    name: Verify image ships and loads the SMT plugins
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the Repo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      # DMS-1240 acceptance: the published image must actually ship and load the transforms.
+      # Building the image runs the full Gradle build stage and layers the SMT jar onto the
+      # plugin path, exactly as docker-publish.yml will at release time.
+      - name: Build the Kafka Connect image
+        run: docker build -t ed-fi-kafka-connect:smoke --build-context parentdir=. -f kafka/Dockerfile kafka
+
+      # connect-plugin-path.sh scans the plugin path with the image's own JDK and reports an
+      # isLoadable column per plugin class, so this catches a jar that is missing from the
+      # image, missing a runtime dependency, or compiled to bytecode the runtime cannot load.
+      - name: Verify the SMT classes are discovered and loadable
+        run: |
+          set -euo pipefail
+          plugins=$(docker run --rm --entrypoint /kafka/bin/connect-plugin-path.sh \
+            ed-fi-kafka-connect:smoke list --plugin-path /kafka/connect)
+          echo "$plugins"
+          for class in \
+            'org.edfi.kafka.connect.transforms.ExpandJson$Value' \
+            'org.edfi.kafka.connect.transforms.DebeziumDeletedToTombstone' \
+            'org.edfi.kafka.connect.transforms.RenameDmsTopicToOpenSearchIndex'; do
+            row=$(grep -F "$class" <<<"$plugins" || true)
+            if [ -z "$row" ]; then
+              echo "::error::$class was not discovered on the image plugin path"
+              exit 1
+            fi
+            if ! grep -qw true <<<"$row"; then
+              echo "::error::$class was discovered but is not loadable: $row"
+              exit 1
+            fi
+          done
+          echo "OK: all Ed-Fi SMT classes are discovered and loadable in the image."
+
   build:
     name: Build
     runs-on: ubuntu-latest
