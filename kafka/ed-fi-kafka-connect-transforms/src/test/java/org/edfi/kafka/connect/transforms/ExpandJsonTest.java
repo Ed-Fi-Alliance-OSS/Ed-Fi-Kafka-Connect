@@ -241,6 +241,23 @@ class ExpandJsonTest {
     }
 
     @Test
+    void Given_SchemaBacked_Root_Schema_With_Struct_Default_Should_Expand_Without_Failing() {
+        // A root struct default is bound to the original field schemas; once "payload" is expanded
+        // from STRING to STRUCT the default can no longer be carried onto the rebuilt schema. Build
+        // the default against the builder instance itself, since Connect validates a struct default
+        // by schema identity.
+        final SchemaBuilder builder = SchemaBuilder.struct().field("payload", Schema.STRING_SCHEMA);
+        final Struct rootDefault = new Struct(builder).put("payload", "{}");
+        final Schema schema = builder.defaultValue(rootDefault).build();
+        final Struct value = new Struct(schema).put("payload", "{\"a\":1}");
+
+        final Struct out = (Struct) transform("payload").apply(schemaRecord(schema, value)).value();
+
+        assertThat(out.schema().field("payload").schema().type()).isEqualTo(Schema.Type.STRUCT);
+        assertThat(((Struct) out.get("payload")).get("a")).isEqualTo(1L);
+    }
+
+    @Test
     void Given_SchemaBacked_Nested_Object_Should_Expand() {
         final Schema schema = stringSchema("payload");
         final Struct value = new Struct(schema).put("payload", "{\"a\":{\"b\":1}}");

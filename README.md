@@ -52,8 +52,9 @@ Both record shapes are supported:
   `RenameDmsTopicToOpenSearchIndex` and `DebeziumDeletedToTombstone` transforms, which both operate
   on a Map `record.value()`. Expanded fields become nested `Map`s.
 - **Schema-backed (Struct) records** — the value schema is rebuilt (preserving the root schema's
-  name, version, doc, parameters, optionality, and default value) with the expanded fields typed as
-  inferred structs/arrays.
+  name, version, doc, parameters, and optionality) with the expanded fields typed as inferred
+  structs/arrays. A struct-level default value is not carried over, since it is bound to the
+  original (pre-expansion) field schemas.
 
 Example of this transformation configuration:
 

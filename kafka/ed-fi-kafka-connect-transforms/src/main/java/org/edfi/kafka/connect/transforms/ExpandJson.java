@@ -150,11 +150,10 @@ public abstract class ExpandJson<R extends ConnectRecord<R>> implements Transfor
             final SchemaAndValue expanded = expansions.get(field.name());
             builder.field(field.name(), expanded == null ? field.schema() : expanded.schema());
         }
-        // Set the default value only after the fields exist so Connect can validate it against the
-        // full struct; root Debezium value schemas normally carry no struct-level default.
-        if (original.defaultValue() != null) {
-            builder.defaultValue(original.defaultValue());
-        }
+        // A struct-level default is bound to the original field schemas, so it cannot be carried
+        // onto the rebuilt schema once an expanded field changes type (STRING -> STRUCT/ARRAY):
+        // Connect would reject it with a SchemaBuilderException. Debezium value schemas carry no
+        // such default, so it is intentionally not copied rather than re-derived per field.
         return builder.build();
     }
 
