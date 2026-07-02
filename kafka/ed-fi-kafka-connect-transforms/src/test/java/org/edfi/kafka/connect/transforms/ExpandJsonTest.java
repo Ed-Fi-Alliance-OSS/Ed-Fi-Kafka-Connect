@@ -402,6 +402,18 @@ class ExpandJsonTest {
     }
 
     @Test
+    void Given_SchemaBacked_Null_Non_String_Field_Should_Fail() {
+        final Schema schema = SchemaBuilder.struct()
+                .field("payload", Schema.OPTIONAL_INT32_SCHEMA)
+                .build();
+        final Struct value = new Struct(schema).put("payload", null);
+
+        assertThatThrownBy(() -> transform("payload").apply(schemaRecord(schema, value)))
+                .isInstanceOf(DataException.class)
+                .hasMessageContaining("STRING");
+    }
+
+    @Test
     void Given_SchemaBacked_Null_Sibling_With_Schema_Default_Should_Stay_Null_After_Expansion() {
         final Schema schema = SchemaBuilder.struct()
                 .field("payload", Schema.STRING_SCHEMA)
@@ -437,6 +449,15 @@ class ExpandJsonTest {
     void Given_SchemaBacked_Invalid_Json_Should_Fail() {
         final Schema schema = stringSchema("payload");
         final Struct value = new Struct(schema).put("payload", "{bad");
+
+        assertThatThrownBy(() -> transform("payload").apply(schemaRecord(schema, value)))
+                .isInstanceOf(DataException.class);
+    }
+
+    @Test
+    void Given_SchemaBacked_Json_With_Trailing_Tokens_Should_Fail() {
+        final Schema schema = stringSchema("payload");
+        final Struct value = new Struct(schema).put("payload", "{\"a\":1} true");
 
         assertThatThrownBy(() -> transform("payload").apply(schemaRecord(schema, value)))
                 .isInstanceOf(DataException.class);

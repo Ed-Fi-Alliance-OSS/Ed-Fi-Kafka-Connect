@@ -103,6 +103,7 @@ public abstract class ExpandJson<R extends ConnectRecord<R>> implements Transfor
             if (existing == null) {
                 continue;
             }
+            requireStringSchema(field, existing);
             // getWithoutDefault: Struct.get substitutes the field schema's default for a null
             // value (e.g. a column DEFAULT propagated by Debezium), which would wrongly expand
             // a null field instead of leaving it unchanged.
@@ -110,7 +111,7 @@ public abstract class ExpandJson<R extends ConnectRecord<R>> implements Transfor
             if (fieldValue == null) {
                 continue;
             }
-            expansions.put(field, JsonExpander.expandToStruct(field, requireStringField(field, existing, fieldValue)));
+            expansions.put(field, JsonExpander.expandToStruct(field, requireStringValue(field, fieldValue)));
         }
         if (expansions.isEmpty()) {
             return record;
@@ -119,10 +120,17 @@ public abstract class ExpandJson<R extends ConnectRecord<R>> implements Transfor
         return newRecord(record, updatedSchema, rebuildStruct(original, updatedSchema, expansions));
     }
 
-    private static String requireStringField(final String field, final Field existing, final Object fieldValue) {
-        if (existing.schema().type() != Schema.Type.STRING || !(fieldValue instanceof String)) {
+    private static void requireStringSchema(final String field, final Field existing) {
+        if (existing.schema().type() != Schema.Type.STRING) {
             throw new DataException("ExpandJson field '" + field + "' must be a STRING, but was: "
                     + existing.schema().type());
+        }
+    }
+
+    private static String requireStringValue(final String field, final Object fieldValue) {
+        if (!(fieldValue instanceof String)) {
+            throw new DataException("ExpandJson field '" + field + "' must be a STRING, but was: "
+                    + fieldValue.getClass().getName());
         }
         return (String) fieldValue;
     }
