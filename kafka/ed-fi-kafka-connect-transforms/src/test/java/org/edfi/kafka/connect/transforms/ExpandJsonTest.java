@@ -230,6 +230,36 @@ class ExpandJsonTest {
     }
 
     @Test
+    void Given_SchemaBacked_Null_Only_Property_Should_Infer_Optional_String_Schema() {
+        // Documents the inference fallback: a property with no type evidence in this record
+        // (JSON null) is typed as optional STRING; the value still expands to null.
+        final Schema schema = stringSchema("payload");
+        final Struct value = new Struct(schema).put("payload", "{\"a\":null}");
+
+        final Struct out = (Struct) transform("payload").apply(schemaRecord(schema, value)).value();
+
+        final Schema inferred = out.schema().field("payload").schema().field("a").schema();
+        assertThat(inferred.type()).isEqualTo(Schema.Type.STRING);
+        assertThat(inferred.isOptional()).isTrue();
+        assertThat(((Struct) out.get("payload")).get("a")).isNull();
+    }
+
+    @Test
+    void Given_SchemaBacked_Empty_Array_Should_Infer_String_Element_Schema() {
+        // Documents the inference fallback: an array with no non-null elements carries no type
+        // evidence, so its element schema is optional STRING for this record.
+        final Schema schema = stringSchema("payload");
+        final Struct value = new Struct(schema).put("payload", "{\"arr\":[]}");
+
+        final Struct out = (Struct) transform("payload").apply(schemaRecord(schema, value)).value();
+
+        final Schema arr = out.schema().field("payload").schema().field("arr").schema();
+        assertThat(arr.type()).isEqualTo(Schema.Type.ARRAY);
+        assertThat(arr.valueSchema().type()).isEqualTo(Schema.Type.STRING);
+        assertThat(arr.valueSchema().isOptional()).isTrue();
+    }
+
+    @Test
     void Given_SchemaBacked_Array_With_Nulls_Should_Be_Allowed() {
         final Schema schema = stringSchema("payload");
         final Struct value = new Struct(schema).put("payload", "{\"arr\":[1,null,3]}");

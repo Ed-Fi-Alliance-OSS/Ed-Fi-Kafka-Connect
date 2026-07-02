@@ -54,7 +54,11 @@ original (pre-expansion) field schemas. Numbers are typed by inference: integral
 INT64 and fail fast with a `DataException` if they do not fit a signed 64-bit long; decimal
 values (and arrays mixing integral and decimal values) map to FLOAT64, rounding to the nearest
 IEEE 754 double, and fail fast with a `DataException` if they fall outside the finite double
-range.
+range. A property that carries no type evidence in the record being expanded — its value is
+JSON `null`, or it is an array with no non-null elements (e.g. `[]`) — is typed as optional
+STRING (for such arrays, an array of optional STRING) in that record's schema, and its value
+expands to null/empty as usual. Because the schema is inferred per record, a later record where
+the same property does carry a value infers the actual type instead.
 
 A record carrying a value without a value schema (a schemaless `Map` record, e.g. one a sink
 connector's JSON converter deserialized with `schemas.enable=false`) fails fast with a

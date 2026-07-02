@@ -34,7 +34,10 @@ java {
 }
 
 ext {
-    kafkaVersion = "3.9.0"
+    // Match the Kafka version shipped in the Debezium/Connect runtime image
+    // (debezium/connect:2.7.0.Final runs Kafka 3.7.0, see ../Dockerfile) so the SMT cannot
+    // compile against connect-api members newer than the runtime classpath it loads on.
+    kafkaVersion = "3.7.0"
     debeziumVersion = "2.7.0.Final"
     // Match the Jackson version already shipped in the Debezium/Connect runtime image
     // so the transform relies on the runtime's Jackson (compileOnly) and bundles nothing.
