@@ -48,11 +48,6 @@ final class JsonExpander {
         return node;
     }
 
-    // Parses a configured field's JSON-object string into a schema-backed Connect value.
-    static SchemaAndValue expandToStruct(final String field, final String json) {
-        return expandToStruct(field, json, true);
-    }
-
     // Parses a configured field's JSON-object string into a schema-backed Connect value, preserving
     // the configured source field's root nullability.
     static SchemaAndValue expandToStruct(final String field, final String json, final boolean optional) {
