@@ -13,17 +13,6 @@ See [the Kafka
 documentation](https://kafka.apache.org/documentation/#connect_transforms) for
 more details about configuring transformations on how to install transforms.
 
-### `RenameDmsTopicToOpenSearchIndex`
-
-This transformation renames the DMS topic to be an OpenSearch index based on the document ProjectName and ResourceName.
-
-Example of this transformation configuration:
-
-```properties
-transforms=RenameDmsTopicToOpenSearchIndex
-transforms.RenameDmsTopicToOpenSearchIndex.type=org.edfi.kafka.connect.transforms.RenameDmsTopicToOpenSearchIndex
-```
-
 ### `DebeziumDeletedToTombstone`
 
 This transformation checks for a Debezium _deleted=true flag. If found, it turns it into a tombstone.
