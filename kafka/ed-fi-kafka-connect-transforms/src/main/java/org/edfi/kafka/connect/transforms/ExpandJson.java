@@ -23,7 +23,8 @@ import org.apache.kafka.connect.errors.DataException;
 import org.apache.kafka.connect.transforms.Transformation;
 
 // Expands configured top-level string fields whose value is a JSON object into a structured
-// Connect value. Generic: it knows nothing about any specific table or column.
+// Connect value. Operates on schema-backed (Struct) value records only, per the DMS-1240 design
+// contract. Generic: it knows nothing about any specific table or column.
 public abstract class ExpandJson<R extends ConnectRecord<R>> implements Transformation<R> {
 
     public static final String SOURCE_FIELDS_CONFIG = "sourceFields";
@@ -70,43 +71,23 @@ public abstract class ExpandJson<R extends ConnectRecord<R>> implements Transfor
     public R apply(final R record) {
         final Object value = operatingValue(record);
         if (value == null) {
+            // Tombstones and other null-value records pass through untouched.
             return record;
         }
-        if (operatingSchema(record) == null) {
-            return applySchemaless(record, value);
+        final Schema schema = operatingSchema(record);
+        if (schema == null) {
+            // The design contract (DMS-1240) is a schema-backed value record from the Debezium
+            // source pipeline; a value without a schema means the transform is deployed against
+            // the wrong converter configuration, so fail fast instead of guessing.
+            throw new DataException(
+                    "ExpandJson requires a schema-backed value record, but this record carries a value "
+                            + "without a value schema");
         }
-        return applyWithSchema(record, operatingSchema(record), value);
+        return applyWithSchema(record, schema, value);
     }
 
     @Override
     public void close() {
-    }
-
-    private R applySchemaless(final R record, final Object value) {
-        if (!(value instanceof Map)) {
-            throw new DataException(
-                    "ExpandJson requires a Map value when the record has no schema, but found: "
-                            + value.getClass().getName());
-        }
-        @SuppressWarnings("unchecked")
-        final Map<String, Object> original = (Map<String, Object>) value;
-        // Copy lazily so a record where no configured field expands is returned unchanged,
-        // matching the schema-backed path.
-        Map<String, Object> updated = null;
-        for (final String field : sourceFields) {
-            final Object fieldValue = original.get(field);
-            if (fieldValue == null) {
-                continue;
-            }
-            if (updated == null) {
-                updated = new LinkedHashMap<>(original);
-            }
-            updated.put(field, JsonExpander.expandToMap(field, requireString(field, fieldValue)));
-        }
-        if (updated == null) {
-            return record;
-        }
-        return newRecord(record, null, updated);
     }
 
     private R applyWithSchema(final R record, final Schema schema, final Object value) {
@@ -136,14 +117,6 @@ public abstract class ExpandJson<R extends ConnectRecord<R>> implements Transfor
         }
         final Schema updatedSchema = rebuildSchema(schema, expansions);
         return newRecord(record, updatedSchema, rebuildStruct(original, updatedSchema, expansions));
-    }
-
-    private static String requireString(final String field, final Object fieldValue) {
-        if (!(fieldValue instanceof String)) {
-            throw new DataException("ExpandJson field '" + field + "' must be a String, but was: "
-                    + fieldValue.getClass().getName());
-        }
-        return (String) fieldValue;
     }
 
     private static String requireStringField(final String field, final Field existing, final Object fieldValue) {

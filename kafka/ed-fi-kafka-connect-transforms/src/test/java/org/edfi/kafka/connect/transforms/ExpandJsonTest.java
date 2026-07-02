@@ -5,7 +5,6 @@
 
 package org.edfi.kafka.connect.transforms;
 
-import java.math.BigInteger;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -50,15 +49,24 @@ class ExpandJsonTest {
         return SchemaBuilder.struct().field(field, Schema.STRING_SCHEMA).build();
     }
 
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> valueAsMap(final SinkRecord record) {
-        return (Map<String, Object>) record.value();
+    @Test
+    void Given_Null_Value_Should_Return_Unchanged() {
+        // A tombstone (null value, no schema) passes through; the schema-backed requirement
+        // applies only to records that carry a value.
+        final SinkRecord result = transform("payload").apply(schemalessRecord(null));
+        assertThat(result.value()).isNull();
     }
 
     @Test
-    void Given_Schemaless_Null_Value_Should_Return_Unchanged() {
-        final SinkRecord result = transform("payload").apply(schemalessRecord(null));
-        assertThat(result.value()).isNull();
+    void Given_Schemaless_Value_Should_Fail() {
+        // DMS-1240 design contract: the input is a schema-backed value record (the Debezium
+        // source pipeline). A record carrying a value without a schema is a misconfiguration.
+        final Map<String, Object> value = new HashMap<>();
+        value.put("payload", "{\"a\":1}");
+
+        assertThatThrownBy(() -> transform("payload").apply(schemalessRecord(value)))
+                .isInstanceOf(DataException.class)
+                .hasMessageContaining("schema");
     }
 
     @Test
@@ -92,142 +100,28 @@ class ExpandJsonTest {
 
     @Test
     void Given_SourceFields_Entry_With_Whitespace_Should_Be_Trimmed() {
-        final Map<String, Object> value = new HashMap<>();
-        value.put("payload", "{\"a\":1}");
+        final Schema schema = stringSchema("payload");
+        final Struct value = new Struct(schema).put("payload", "{\"a\":1}");
 
-        final Map<String, Object> out = valueAsMap(transform(" payload ").apply(schemalessRecord(value)));
+        final Struct out = (Struct) transform(" payload ").apply(schemaRecord(schema, value)).value();
 
-        assertThat(out.get("payload")).isEqualTo(Map.of("a", 1));
+        assertThat(((Struct) out.get("payload")).get("a")).isEqualTo(1L);
     }
 
     @Test
-    void Given_Schemaless_Json_Object_Field_Should_Expand() {
-        final Map<String, Object> value = new HashMap<>();
-        value.put("payload", "{\"a\":1,\"b\":\"x\"}");
-        value.put("other", "keep");
+    void Given_Multiple_SourceFields_Should_Expand_Each() {
+        final Schema schema = SchemaBuilder.struct()
+                .field("a", Schema.STRING_SCHEMA)
+                .field("b", Schema.STRING_SCHEMA)
+                .build();
+        final Struct value = new Struct(schema)
+                .put("a", "{\"x\":1}")
+                .put("b", "{\"y\":2}");
 
-        final Map<String, Object> out = valueAsMap(transform("payload").apply(schemalessRecord(value)));
+        final Struct out = (Struct) transform("a", "b").apply(schemaRecord(schema, value)).value();
 
-        final Map<String, Object> expected = new HashMap<>();
-        expected.put("a", 1);
-        expected.put("b", "x");
-        assertThat(out.get("payload")).isEqualTo(expected);
-        assertThat(out.get("other")).isEqualTo("keep");
-    }
-
-    @Test
-    void Given_Schemaless_Nested_Object_Should_Expand() {
-        final Map<String, Object> value = new HashMap<>();
-        value.put("payload", "{\"a\":{\"b\":1}}");
-
-        final Map<String, Object> out = valueAsMap(transform("payload").apply(schemalessRecord(value)));
-
-        assertThat(out.get("payload")).isEqualTo(Map.of("a", Map.of("b", 1)));
-    }
-
-    @Test
-    void Given_Schemaless_Scalar_Array_Should_Expand() {
-        final Map<String, Object> value = new HashMap<>();
-        value.put("payload", "{\"arr\":[1,2,3]}");
-
-        final Map<String, Object> out = valueAsMap(transform("payload").apply(schemalessRecord(value)));
-
-        assertThat(out.get("payload")).isEqualTo(Map.of("arr", List.of(1, 2, 3)));
-    }
-
-    @Test
-    void Given_Schemaless_Object_Array_Should_Expand() {
-        final Map<String, Object> value = new HashMap<>();
-        value.put("payload", "{\"arr\":[{\"a\":1},{\"a\":2}]}");
-
-        final Map<String, Object> out = valueAsMap(transform("payload").apply(schemalessRecord(value)));
-
-        assertThat(out.get("payload")).isEqualTo(Map.of("arr", List.of(Map.of("a", 1), Map.of("a", 2))));
-    }
-
-    @Test
-    void Given_Schemaless_Empty_Array_Should_Expand() {
-        final Map<String, Object> value = new HashMap<>();
-        value.put("payload", "{\"arr\":[]}");
-
-        final Map<String, Object> out = valueAsMap(transform("payload").apply(schemalessRecord(value)));
-
-        assertThat(out.get("payload")).isEqualTo(Map.of("arr", List.of()));
-    }
-
-    @Test
-    void Given_Schemaless_Null_Field_Should_Be_Noop() {
-        final Map<String, Object> value = new HashMap<>();
-        value.put("payload", null);
-        value.put("other", "keep");
-
-        final SinkRecord result = transform("payload").apply(schemalessRecord(value));
-
-        assertThat(result.value()).isSameAs(value);
-    }
-
-    @Test
-    void Given_Schemaless_Missing_Field_Should_Be_Noop() {
-        final Map<String, Object> value = new HashMap<>();
-        value.put("other", "keep");
-
-        final SinkRecord result = transform("payload").apply(schemalessRecord(value));
-
-        assertThat(result.value()).isSameAs(value);
-    }
-
-    @Test
-    void Given_Schemaless_Non_String_Field_Should_Fail() {
-        final Map<String, Object> value = new HashMap<>();
-        value.put("payload", 123);
-
-        assertThatThrownBy(() -> transform("payload").apply(schemalessRecord(value)))
-                .isInstanceOf(DataException.class);
-    }
-
-    @Test
-    void Given_Schemaless_Invalid_Json_Should_Fail() {
-        final Map<String, Object> value = new HashMap<>();
-        value.put("payload", "{not json");
-
-        assertThatThrownBy(() -> transform("payload").apply(schemalessRecord(value)))
-                .isInstanceOf(DataException.class);
-    }
-
-    @Test
-    void Given_Schemaless_Root_Array_Should_Fail() {
-        final Map<String, Object> value = new HashMap<>();
-        value.put("payload", "[1,2,3]");
-
-        assertThatThrownBy(() -> transform("payload").apply(schemalessRecord(value)))
-                .isInstanceOf(DataException.class);
-    }
-
-    @Test
-    void Given_Schemaless_Root_Scalar_Should_Fail() {
-        final Map<String, Object> value = new HashMap<>();
-        value.put("payload", "3");
-
-        assertThatThrownBy(() -> transform("payload").apply(schemalessRecord(value)))
-                .isInstanceOf(DataException.class);
-    }
-
-    @Test
-    void Given_Schemaless_Non_Map_Value_Should_Fail() {
-        assertThatThrownBy(() -> transform("payload").apply(schemalessRecord("not a map")))
-                .isInstanceOf(DataException.class);
-    }
-
-    @Test
-    void Given_Schemaless_Multiple_Fields_Should_Expand_Each() {
-        final Map<String, Object> value = new HashMap<>();
-        value.put("a", "{\"x\":1}");
-        value.put("b", "{\"y\":2}");
-
-        final Map<String, Object> out = valueAsMap(transform("a", "b").apply(schemalessRecord(value)));
-
-        assertThat(out.get("a")).isEqualTo(Map.of("x", 1));
-        assertThat(out.get("b")).isEqualTo(Map.of("y", 2));
+        assertThat(((Struct) out.get("a")).get("x")).isEqualTo(1L);
+        assertThat(((Struct) out.get("b")).get("y")).isEqualTo(2L);
     }
 
     @Test
@@ -409,18 +303,6 @@ class ExpandJsonTest {
 
         assertThatThrownBy(() -> transform("payload").apply(schemaRecord(schema, value)))
                 .isInstanceOf(DataException.class);
-    }
-
-    @Test
-    void Given_Schemaless_Integral_Above_Long_Range_Should_Preserve_Exact_Value() {
-        // Documents the numeric contract: the schemaless path keeps Jackson's exact numeric types,
-        // so an integral value beyond long range stays a lossless BigInteger.
-        final Map<String, Object> value = new HashMap<>();
-        value.put("payload", "{\"n\":9223372036854775808}");
-
-        final Map<String, Object> out = valueAsMap(transform("payload").apply(schemalessRecord(value)));
-
-        assertThat(out.get("payload")).isEqualTo(Map.of("n", new BigInteger("9223372036854775808")));
     }
 
     @Test

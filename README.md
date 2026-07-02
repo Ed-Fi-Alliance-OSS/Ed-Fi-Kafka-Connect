@@ -46,21 +46,22 @@ than silently passing records through unchanged. Entries are trimmed of surround
 configured field that is absent or null is left unchanged; a field whose value is not a JSON
 object (invalid JSON, a JSON array, or a scalar) fails fast with a `DataException`.
 
-Both record shapes are supported:
+The transform operates on **schema-backed (Struct) value records** only — the shape a Debezium
+source connector produces. The value schema is rebuilt (preserving the root schema's name,
+version, doc, parameters, and optionality) with the expanded fields typed as inferred
+structs/arrays. A struct-level default value is not carried over, since it is bound to the
+original (pre-expansion) field schemas. Numbers are typed by inference: integral values map to
+INT64 and fail fast with a `DataException` if they do not fit a signed 64-bit long; decimal
+values (and arrays mixing integral and decimal values) map to FLOAT64, rounding to the nearest
+IEEE 754 double, and fail fast with a `DataException` if they fall outside the finite double
+range.
 
-- **Schemaless (Map) records** — for example, records a sink connector's JSON converter has
-  deserialized with `schemas.enable=false`. Expanded fields become nested `Map`s. Integral
-  numbers keep their exact parsed values (values beyond a signed 64-bit long stay lossless
-  `BigInteger`s); decimal numbers are parsed as IEEE 754 doubles, rounding to the nearest double
-  just like the schema-backed path.
-- **Schema-backed (Struct) records** — the value schema is rebuilt (preserving the root schema's
-  name, version, doc, parameters, and optionality) with the expanded fields typed as inferred
-  structs/arrays. A struct-level default value is not carried over, since it is bound to the
-  original (pre-expansion) field schemas. Numbers are typed by inference: integral values map to
-  INT64 and fail fast with a `DataException` if they do not fit a signed 64-bit long; decimal
-  values (and arrays mixing integral and decimal values) map to FLOAT64, rounding to the nearest
-  IEEE 754 double, and fail fast with a `DataException` if they fall outside the finite double
-  range.
+A record carrying a value without a value schema (a schemaless `Map` record, e.g. one a sink
+connector's JSON converter deserialized with `schemas.enable=false`) fails fast with a
+`DataException`: it means the transform is deployed against the wrong converter configuration.
+Null-value records (tombstones) pass through unchanged. On the Debezium source side,
+`value.converter.schemas.enable=false` only controls the serialized output envelope — the
+transform still receives schema-backed records and is unaffected by that setting.
 
 Example of this transformation configuration:
 

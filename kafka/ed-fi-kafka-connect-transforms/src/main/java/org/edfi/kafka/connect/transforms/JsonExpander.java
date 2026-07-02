@@ -19,7 +19,6 @@ import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.errors.DataException;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -30,14 +29,7 @@ final class JsonExpander {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() { };
-
     private JsonExpander() {
-    }
-
-    // Parses a configured field's JSON-object string into a schemaless Map tree.
-    static Map<String, Object> expandToMap(final String field, final String json) {
-        return MAPPER.convertValue(parseObject(field, json), MAP_TYPE);
     }
 
     // Parses the string, requiring the JSON root to be an object; fail-fast otherwise.
@@ -200,8 +192,7 @@ final class JsonExpander {
 
     // Guards the INT64 mapping: Jackson's asLong() silently wraps an integral value outside the
     // signed 64-bit range (e.g. 9223372036854775808 becomes Long.MIN_VALUE), which would corrupt
-    // data. Fail fast instead. (The schemaless path is unaffected: it keeps Jackson's exact
-    // numeric types, so such values stay lossless BigIntegers.)
+    // data. Fail fast instead.
     private static long toInt64(final JsonNode node) {
         if (!node.canConvertToLong()) {
             throw new DataException("ExpandJson cannot expand integral number " + node.asText()
