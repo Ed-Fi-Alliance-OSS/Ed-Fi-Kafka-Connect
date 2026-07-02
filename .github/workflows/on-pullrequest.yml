@@ -68,11 +68,17 @@ jobs:
           echo "OK: runtime JDK $runtime can load Java $target bytecode."
 
   verify-image-plugins:
-    name: Verify image ships and loads the SMT plugins
+    name: Verify the SMT plugins load (Connect 3.x and 4.x) and execute
     runs-on: ubuntu-latest
     steps:
       - name: Checkout the Repo
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Java
+        uses: actions/setup-java@7a6d8a8234af8eb26422e24e3006232cccaa061b # v4.6.0
+        with:
+          java-version: '17'
+          distribution: 'temurin'
 
       # DMS-1240 acceptance: the published image must actually ship and load the transforms.
       # Building the image runs the full Gradle build stage and layers the SMT jar onto the
@@ -80,10 +86,13 @@ jobs:
       - name: Build the Kafka Connect image
         run: docker build -t ed-fi-kafka-connect:smoke --build-context parentdir=. -f kafka/Dockerfile kafka
 
-      # connect-plugin-path.sh scans the plugin path with the image's own JDK and reports an
-      # isLoadable column per plugin class, so this catches a jar that is missing from the
-      # image, missing a runtime dependency, or compiled to bytecode the runtime cannot load.
-      - name: Verify the SMT classes are discovered and loadable
+      # connect-plugin-path.sh scans the plugin path with the image's own JDK and reports
+      # per-plugin isLoadable and hasManifest columns, catching a jar that is missing from the
+      # image, compiled to bytecode the runtime cannot load, or shipped without its KIP-898
+      # ServiceLoader manifest. It stops at class linking: dependencies referenced only from
+      # method bodies (e.g. Jackson) are not resolved until the transform executes, which the
+      # execution smoke below covers.
+      - name: Verify the SMT classes load in the image (Connect 3.x runtime)
         run: |
           set -euo pipefail
           plugins=$(docker run --rm --entrypoint /kafka/bin/connect-plugin-path.sh \
@@ -98,12 +107,72 @@ jobs:
               echo "::error::$class was not discovered on the image plugin path"
               exit 1
             fi
-            if ! grep -qw true <<<"$row"; then
-              echo "::error::$class was discovered but is not loadable: $row"
+            loadable=$(cut -f6 <<<"$row")
+            manifest=$(cut -f7 <<<"$row")
+            if [ "$loadable" != "true" ] || [ "$manifest" != "true" ]; then
+              echo "::error::$class: isLoadable=$loadable hasManifest=$manifest (both must be true): $row"
               exit 1
             fi
           done
-          echo "OK: all Ed-Fi SMT classes are discovered and loadable in the image."
+          echo "OK: all Ed-Fi SMT classes load in the image and carry ServiceLoader manifests."
+
+      - name: Extract the plugin directory and runtime classpath from the image
+        run: |
+          set -euo pipefail
+          docker create --name smt-extract ed-fi-kafka-connect:smoke
+          docker cp smt-extract:/kafka/connect/ed-fi-kafka-connect-transforms ./smt-plugin
+          docker cp smt-extract:/kafka/libs ./image-libs
+          docker rm smt-extract
+
+      # DMS-1240 acceptance: the transform must load under Kafka Connect 4.x, not only the
+      # shipped Connect 3.x runtime (the whole reason the RedHat expandjsonsmt is being
+      # replaced). Connect 4.x discovers plugins through KIP-898 ServiceLoader manifests by
+      # default (plugin.discovery=service_load), so hasManifest=true is load-bearing here. The
+      # plugin directory lifted from the built image is scanned by a stock Apache Kafka 4.x
+      # image with its own JDK.
+      - name: Verify the SMT classes load under Kafka Connect 4.x
+        run: |
+          set -euo pipefail
+          plugins=$(docker run --rm \
+            -v "$PWD/smt-plugin:/smt-plugins/ed-fi-kafka-connect-transforms:ro" \
+            --entrypoint /opt/kafka/bin/connect-plugin-path.sh \
+            apache/kafka:4.3.1@sha256:77e3df9054047a88b520d0cc46e16696d3b22022e1d580aeccd2632df6532837 \
+            list --plugin-path /smt-plugins)
+          echo "$plugins"
+          for class in \
+            'org.edfi.kafka.connect.transforms.ExpandJson$Value' \
+            'org.edfi.kafka.connect.transforms.DebeziumDeletedToTombstone' \
+            'org.edfi.kafka.connect.transforms.RenameDmsTopicToOpenSearchIndex'; do
+            row=$(grep -F "$class" <<<"$plugins" || true)
+            if [ -z "$row" ]; then
+              echo "::error::$class was not discovered under Kafka Connect 4.x"
+              exit 1
+            fi
+            loadable=$(cut -f6 <<<"$row")
+            manifest=$(cut -f7 <<<"$row")
+            if [ "$loadable" != "true" ] || [ "$manifest" != "true" ]; then
+              echo "::error::$class under Connect 4.x: isLoadable=$loadable hasManifest=$manifest (both must be true): $row"
+              exit 1
+            fi
+          done
+          echo "OK: all Ed-Fi SMT classes load under Kafka Connect 4.x."
+
+      # The load checks above stop at linking. Jackson is provided by the Connect runtime
+      # (compileOnly in build.gradle, not bundled in the plugin jar) and is first resolved when
+      # ExpandJson processes a record, so a missing or incompatible runtime Jackson passes every
+      # load check and fails on the first record. This compiles the smoke against the image's
+      # own jars and runs it inside the image, applying ExpandJson$Value to one schema-backed
+      # record on the image's runtime classpath.
+      - name: Run the ExpandJson execution smoke inside the image
+        run: |
+          set -euo pipefail
+          mkdir -p smoke-classes
+          javac --release 17 -cp "image-libs/*:smt-plugin/*" -d smoke-classes \
+            kafka/ci-smoke/ExpandJsonExecutionSmoke.java
+          docker run --rm -v "$PWD/smoke-classes:/smoke:ro" --entrypoint java \
+            ed-fi-kafka-connect:smoke \
+            -cp '/smoke:/kafka/libs/*:/kafka/connect/ed-fi-kafka-connect-transforms/*' \
+            ExpandJsonExecutionSmoke
 
   build:
     name: Build

@@ -25,8 +25,9 @@ repositories {
 // (debezium/connect:2.7.0.Final, see ../Dockerfile) ships OpenJDK 21, which loads Java 17 classes
 // without UnsupportedClassVersionError. Two CI jobs in .github/workflows/on-pullrequest.yml guard
 // this on every change: "Verify runtime Java compatibility" enforces runtime JDK >= this target,
-// and "Verify image ships and loads the SMT plugins" builds the image and proves the transform
-// classes load inside it.
+// and "Verify the SMT plugins load (Connect 3.x and 4.x) and execute" builds the image, proves
+// the transform classes load inside it and under Kafka Connect 4.x, and executes ExpandJson on
+// one record against the image's runtime classpath.
 java {
     sourceCompatibility = JavaVersion.VERSION_17
     targetCompatibility = JavaVersion.VERSION_17
