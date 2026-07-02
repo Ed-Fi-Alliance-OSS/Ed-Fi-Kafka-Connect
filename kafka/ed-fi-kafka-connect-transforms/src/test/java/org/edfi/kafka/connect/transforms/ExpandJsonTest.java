@@ -164,6 +164,34 @@ class ExpandJsonTest {
     }
 
     @Test
+    void Given_Required_Source_Field_Should_Remain_Required_After_Expansion() {
+        final Schema schema = SchemaBuilder.struct()
+                .field("payload", Schema.STRING_SCHEMA)
+                .build();
+        final Struct value = new Struct(schema).put("payload", "{\"a\":1}");
+
+        final Schema expanded = transform("payload").apply(schemaRecord(schema, value)).valueSchema()
+                .field("payload").schema();
+
+        assertThat(expanded.type()).isEqualTo(Schema.Type.STRUCT);
+        assertThat(expanded.isOptional()).isFalse();
+    }
+
+    @Test
+    void Given_Optional_Source_Field_Should_Remain_Optional_After_Expansion() {
+        final Schema schema = SchemaBuilder.struct()
+                .field("payload", Schema.OPTIONAL_STRING_SCHEMA)
+                .build();
+        final Struct value = new Struct(schema).put("payload", "{\"a\":1}");
+
+        final Schema expanded = transform("payload").apply(schemaRecord(schema, value)).valueSchema()
+                .field("payload").schema();
+
+        assertThat(expanded.type()).isEqualTo(Schema.Type.STRUCT);
+        assertThat(expanded.isOptional()).isTrue();
+    }
+
+    @Test
     void Given_SchemaBacked_Root_Schema_With_Struct_Default_Should_Expand_Without_Failing() {
         // A root struct default is bound to the original field schemas; once "payload" is expanded
         // from STRING to STRUCT the default can no longer be carried onto the rebuilt schema. Build
@@ -348,6 +376,17 @@ class ExpandJsonTest {
     }
 
     @Test
+    void Given_SchemaBacked_Mixed_Numeric_Array_With_Integral_Above_Long_Range_Should_Fail() {
+        final Schema schema = stringSchema("payload");
+        final Struct value = new Struct(schema).put("payload", "{\"arr\":[9223372036854775808,1.5]}");
+
+        assertThatThrownBy(() -> transform("payload").apply(schemaRecord(schema, value)))
+                .isInstanceOf(DataException.class)
+                .hasMessageContaining("9223372036854775808")
+                .hasMessageContaining("INT64");
+    }
+
+    @Test
     void Given_SchemaBacked_Object_Array_Mixed_Numeric_Field_Should_Promote_To_Double() {
         final Schema schema = stringSchema("payload");
         final Struct value = new Struct(schema).put("payload", "{\"arr\":[{\"score\":1},{\"score\":2.5}]}");
@@ -360,6 +399,18 @@ class ExpandJsonTest {
         assertThat(first.schema().field("score").schema().type()).isEqualTo(Schema.Type.FLOAT64);
         assertThat(first.get("score")).isEqualTo(1.0d);
         assertThat(second.get("score")).isEqualTo(2.5d);
+    }
+
+    @Test
+    void Given_SchemaBacked_Object_Array_Mixed_Numeric_Field_With_Integral_Above_Long_Range_Should_Fail() {
+        final Schema schema = stringSchema("payload");
+        final Struct value = new Struct(schema)
+                .put("payload", "{\"arr\":[{\"score\":9223372036854775808},{\"score\":1.5}]}");
+
+        assertThatThrownBy(() -> transform("payload").apply(schemaRecord(schema, value)))
+                .isInstanceOf(DataException.class)
+                .hasMessageContaining("9223372036854775808")
+                .hasMessageContaining("INT64");
     }
 
     @Test

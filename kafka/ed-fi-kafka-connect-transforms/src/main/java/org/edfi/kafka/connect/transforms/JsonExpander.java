@@ -50,8 +50,14 @@ final class JsonExpander {
 
     // Parses a configured field's JSON-object string into a schema-backed Connect value.
     static SchemaAndValue expandToStruct(final String field, final String json) {
+        return expandToStruct(field, json, true);
+    }
+
+    // Parses a configured field's JSON-object string into a schema-backed Connect value, preserving
+    // the configured source field's root nullability.
+    static SchemaAndValue expandToStruct(final String field, final String json, final boolean optional) {
         final JsonNode node = parseObject(field, json);
-        final Schema schema = schemaOf(List.of(node));
+        final Schema schema = objectSchema(List.of(node), optional);
         return new SchemaAndValue(schema, toConnectValue(node, schema));
     }
 
@@ -75,6 +81,10 @@ final class JsonExpander {
     }
 
     private static Schema objectSchema(final List<JsonNode> objects) {
+        return objectSchema(objects, true);
+    }
+
+    private static Schema objectSchema(final List<JsonNode> objects, final boolean optional) {
         final Map<String, List<JsonNode>> fieldSamples = new LinkedHashMap<>();
         for (final JsonNode object : objects) {
             final Iterator<Map.Entry<String, JsonNode>> it = object.fields();
@@ -86,7 +96,10 @@ final class JsonExpander {
                 }
             }
         }
-        final SchemaBuilder builder = SchemaBuilder.struct().optional();
+        final SchemaBuilder builder = SchemaBuilder.struct();
+        if (optional) {
+            builder.optional();
+        }
         fieldSamples.forEach((name, values) -> builder.field(name, schemaOf(values)));
         return builder.build();
     }
@@ -196,18 +209,26 @@ final class JsonExpander {
     // signed 64-bit range (e.g. 9223372036854775808 becomes Long.MIN_VALUE), which would corrupt
     // data. Fail fast instead.
     private static long toInt64(final JsonNode node) {
+        requireIntegralFitsInInt64(node);
+        return node.asLong();
+    }
+
+    private static void requireIntegralFitsInInt64(final JsonNode node) {
         if (!node.canConvertToLong()) {
             throw new DataException("ExpandJson cannot expand integral number " + node.asText()
                     + " because it does not fit in a Connect INT64 (signed 64-bit long)");
         }
-        return node.asLong();
     }
 
     // Guards the FLOAT64 mapping like toInt64 guards INT64: a decimal beyond the finite double
     // range (e.g. 1e999) parses to Infinity, which is not representable in JSON and would be
-    // silently type-corrupted downstream. Fail fast instead. (Rounding within the finite range
-    // remains the documented contract.)
+    // silently type-corrupted downstream. Integral values are still required to fit INT64 before
+    // numeric promotion to avoid silently rounding out-of-contract integers. (Decimal rounding
+    // within the finite range remains the documented contract.)
     private static double toFloat64(final JsonNode node) {
+        if (node.isIntegralNumber()) {
+            requireIntegralFitsInInt64(node);
+        }
         final double value = node.asDouble();
         if (!Double.isFinite(value)) {
             throw new DataException("ExpandJson cannot expand number " + node.asText()

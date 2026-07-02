@@ -169,9 +169,9 @@ jobs:
       # (compileOnly in build.gradle, not bundled in the plugin jar) and is first resolved when
       # ExpandJson processes a record, so a missing or incompatible runtime Jackson passes every
       # load check and fails on the first record. This compiles the smoke against the image's
-      # own jars and runs it inside the image, applying ExpandJson$Value to one schema-backed
-      # record on the image's runtime classpath.
-      - name: Run the ExpandJson execution smoke inside the image
+      # own jars and runs it inside the Connect 3.x image, applying ExpandJson$Value to one
+      # schema-backed record on the image's runtime classpath.
+      - name: Run the ExpandJson execution smoke inside the Connect 3.x image
         run: |
           set -euo pipefail
           mkdir -p smoke-classes
@@ -180,6 +180,20 @@ jobs:
           docker run --rm -v "$PWD/smoke-classes:/smoke:ro" --entrypoint java \
             ed-fi-kafka-connect:smoke \
             -cp '/smoke:/kafka/libs/*:/kafka/connect/ed-fi-kafka-connect-transforms/*' \
+            ExpandJsonExecutionSmoke
+
+      # Re-run the same executable smoke inside the stock Kafka 4.x image. The plugin scan above
+      # proves ServiceLoader discovery under Connect 4.x; this proves ExpandJson can execute there
+      # with the Kafka 4.x runtime-provided dependencies instead of only linking.
+      - name: Run the ExpandJson execution smoke inside the Connect 4.x image
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "$PWD/smoke-classes:/smoke:ro" \
+            -v "$PWD/smt-plugin:/smt-plugins/ed-fi-kafka-connect-transforms:ro" \
+            --entrypoint java \
+            apache/kafka:4.3.1@sha256:77e3df9054047a88b520d0cc46e16696d3b22022e1d580aeccd2632df6532837 \
+            -cp '/smoke:/opt/kafka/libs/*:/smt-plugins/ed-fi-kafka-connect-transforms/*' \
             ExpandJsonExecutionSmoke
 
   build:

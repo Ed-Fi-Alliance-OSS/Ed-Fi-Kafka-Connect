@@ -111,7 +111,8 @@ public abstract class ExpandJson<R extends ConnectRecord<R>> implements Transfor
             if (fieldValue == null) {
                 continue;
             }
-            expansions.put(field, JsonExpander.expandToStruct(field, requireStringValue(field, fieldValue)));
+            expansions.put(field, JsonExpander.expandToStruct(field, requireStringValue(field, fieldValue),
+                    existing.schema().isOptional()));
         }
         if (expansions.isEmpty()) {
             return record;

@@ -27,7 +27,7 @@ repositories {
 // this on every change: "Verify runtime Java compatibility" enforces runtime JDK >= this target,
 // and "Verify the SMT plugins load (Connect 3.x and 4.x) and execute" builds the image, proves
 // the transform classes load inside it and under Kafka Connect 4.x, and executes ExpandJson on
-// one record against the image's runtime classpath.
+// one record against both runtime classpaths.
 java {
     sourceCompatibility = JavaVersion.VERSION_17
     targetCompatibility = JavaVersion.VERSION_17
