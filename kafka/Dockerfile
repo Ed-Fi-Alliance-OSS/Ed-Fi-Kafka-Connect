@@ -55,15 +55,3 @@ COPY --from=parentdir LICENSE /kafka/connect/EDFI_LICENSE
 COPY --from=parentdir NOTICES.md /kafka/connect/EDFI_NOTICES.md
 
 COPY --from=build /home/gradle/src/build/libs /kafka/connect/ed-fi-kafka-connect-transforms
-
-# Kafka connect SMT to expand JSON string: https://github.com/RedHatInsights/expandjsonsmt
-ARG expandjsonsmt=kafka-connect-smt-expandjsonsmt-0.0.7.tar.gz
-ADD --chown=kafka --chmod=600 https://github.com/RedHatInsights/expandjsonsmt/releases/download/0.0.7/${expandjsonsmt} \
-    /kafka/connect/
-
-RUN originalSha="47f470091a1102826966001d0095a4e419beee00a16c0e77b4108261d04faed0" && \
-    newSha=$(sha256sum ${expandjsonsmt} | awk '{print $1}') && \
-    if [ "$originalSha" != "$newSha" ]; then exit 1; fi
-
-RUN tar -xvf ${expandjsonsmt} && \
-    rm ${expandjsonsmt}

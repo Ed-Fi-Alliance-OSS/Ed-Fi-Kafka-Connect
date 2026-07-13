@@ -33,6 +33,169 @@ jobs:
     with:
       config-file-path: ./.github/workflows/bidi-config.json
 
+  verify-runtime-java:
+    name: Verify runtime Java compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the Repo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      # Guards against UnsupportedClassVersionError: the SMT jar is compiled to a Java bytecode
+      # target (build.gradle), but it is loaded by the JDK inside the deployment runtime image
+      # (debezium/connect, see kafka/Dockerfile) -- NOT by CI's Temurin build JDK. This reads the
+      # runtime JDK from the image itself and fails if it is older than the bytecode target.
+      - name: Verify the runtime JDK can load the compiled SMT bytecode
+        run: |
+          set -euo pipefail
+          target=$(grep -oP 'targetCompatibility\s*=\s*JavaVersion\.VERSION_\K[0-9]+' \
+            kafka/ed-fi-kafka-connect-transforms/build.gradle)
+          image=$(grep -oP '^FROM \Kdebezium/connect:\S+' kafka/Dockerfile | head -n1)
+          echo "SMT bytecode target: Java $target"
+          echo "Runtime image:       $image"
+          # "|| true" so an unrecognized version banner reaches the -z diagnostic below instead
+          # of set -e killing the script at this assignment with a bare exit code.
+          runtime=$(docker run --rm --entrypoint java "$image" -version 2>&1 \
+            | grep -oiE '(openjdk|java) version "[0-9]+' | grep -oE '[0-9]+$' | head -n1 || true)
+          echo "Runtime JDK major:   $runtime"
+          if [ -z "$runtime" ]; then
+            echo "::error::Could not determine the runtime JDK version from $image"
+            exit 1
+          fi
+          if [ "$runtime" -lt "$target" ]; then
+            echo "::error::Runtime JDK $runtime is older than the SMT bytecode target $target; the plugin would fail to load with UnsupportedClassVersionError."
+            exit 1
+          fi
+          echo "OK: runtime JDK $runtime can load Java $target bytecode."
+
+  verify-image-plugins:
+    name: Verify the SMT plugins load (Connect 3.x and 4.x) and execute
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the Repo
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Java
+        uses: actions/setup-java@7a6d8a8234af8eb26422e24e3006232cccaa061b # v4.6.0
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      # DMS-1240 acceptance: the published image must actually ship and load the transforms.
+      # Building the image runs the full Gradle build stage and layers the SMT jar onto the
+      # plugin path, exactly as docker-publish.yml will at release time.
+      - name: Build the Kafka Connect image
+        run: docker build -t ed-fi-kafka-connect:smoke --build-context parentdir=. -f kafka/Dockerfile kafka
+
+      # The class list under test is read from the ServiceLoader manifest — the single source
+      # of truth for what the plugin ships — so a transform added to the manifest is verified
+      # here (and in the Connect 4.x step below) without touching this workflow.
+      - name: Read the transform class list from the ServiceLoader manifest
+        run: |
+          set -euo pipefail
+          manifest="kafka/ed-fi-kafka-connect-transforms/src/main/resources/META-INF/services/org.apache.kafka.connect.transforms.Transformation"
+          sed -e 's/#.*//' -e 's/[[:space:]]//g' "$manifest" | grep -v '^$' > transform-classes.txt
+          if [ ! -s transform-classes.txt ]; then
+            echo "::error::No transform classes listed in $manifest"
+            exit 1
+          fi
+          cat transform-classes.txt
+
+      # connect-plugin-path.sh scans the plugin path with the image's own JDK and reports
+      # per-plugin isLoadable and hasManifest columns, catching a jar that is missing from the
+      # image, compiled to bytecode the runtime cannot load, or shipped without its KIP-898
+      # ServiceLoader manifest. It stops at class linking: dependencies referenced only from
+      # method bodies (e.g. Jackson) are not resolved until the transform executes, which the
+      # execution smoke below covers.
+      - name: Verify the SMT classes load in the image (Connect 3.x runtime)
+        run: |
+          set -euo pipefail
+          plugins=$(docker run --rm --entrypoint /kafka/bin/connect-plugin-path.sh \
+            ed-fi-kafka-connect:smoke list --plugin-path /kafka/connect)
+          echo "$plugins"
+          while IFS= read -r class; do
+            row=$(grep -F "$class" <<<"$plugins" || true)
+            if [ -z "$row" ]; then
+              echo "::error::$class was not discovered on the image plugin path"
+              exit 1
+            fi
+            loadable=$(cut -f6 <<<"$row")
+            manifest=$(cut -f7 <<<"$row")
+            if [ "$loadable" != "true" ] || [ "$manifest" != "true" ]; then
+              echo "::error::$class: isLoadable=$loadable hasManifest=$manifest (both must be true): $row"
+              exit 1
+            fi
+          done < transform-classes.txt
+          echo "OK: all Ed-Fi SMT classes load in the image and carry ServiceLoader manifests."
+
+      - name: Extract the plugin directory and runtime classpath from the image
+        run: |
+          set -euo pipefail
+          docker create --name smt-extract ed-fi-kafka-connect:smoke
+          docker cp smt-extract:/kafka/connect/ed-fi-kafka-connect-transforms ./smt-plugin
+          docker cp smt-extract:/kafka/libs ./image-libs
+          docker rm smt-extract
+
+      # DMS-1240 acceptance: the transform must load under Kafka Connect 4.x, not only the
+      # shipped Connect 3.x runtime (the whole reason the RedHat expandjsonsmt is being
+      # replaced). Connect 4.x discovers plugins through KIP-898 ServiceLoader manifests by
+      # default (plugin.discovery=service_load), so hasManifest=true is load-bearing here. The
+      # plugin directory lifted from the built image is scanned by a stock Apache Kafka 4.x
+      # image with its own JDK.
+      - name: Verify the SMT classes load under Kafka Connect 4.x
+        run: |
+          set -euo pipefail
+          plugins=$(docker run --rm \
+            -v "$PWD/smt-plugin:/smt-plugins/ed-fi-kafka-connect-transforms:ro" \
+            --entrypoint /opt/kafka/bin/connect-plugin-path.sh \
+            apache/kafka:4.3.1@sha256:77e3df9054047a88b520d0cc46e16696d3b22022e1d580aeccd2632df6532837 \
+            list --plugin-path /smt-plugins)
+          echo "$plugins"
+          while IFS= read -r class; do
+            row=$(grep -F "$class" <<<"$plugins" || true)
+            if [ -z "$row" ]; then
+              echo "::error::$class was not discovered under Kafka Connect 4.x"
+              exit 1
+            fi
+            loadable=$(cut -f6 <<<"$row")
+            manifest=$(cut -f7 <<<"$row")
+            if [ "$loadable" != "true" ] || [ "$manifest" != "true" ]; then
+              echo "::error::$class under Connect 4.x: isLoadable=$loadable hasManifest=$manifest (both must be true): $row"
+              exit 1
+            fi
+          done < transform-classes.txt
+          echo "OK: all Ed-Fi SMT classes load under Kafka Connect 4.x."
+
+      # The load checks above stop at linking. Jackson is provided by the Connect runtime
+      # (compileOnly in build.gradle, not bundled in the plugin jar) and is first resolved when
+      # ExpandJson processes a record, so a missing or incompatible runtime Jackson passes every
+      # load check and fails on the first record. This compiles the smoke against the image's
+      # own jars and runs it inside the Connect 3.x image, applying ExpandJson$Value to one
+      # schema-backed record on the image's runtime classpath.
+      - name: Run the ExpandJson execution smoke inside the Connect 3.x image
+        run: |
+          set -euo pipefail
+          mkdir -p smoke-classes
+          javac --release 17 -cp "image-libs/*:smt-plugin/*" -d smoke-classes \
+            kafka/ci-smoke/ExpandJsonExecutionSmoke.java
+          docker run --rm -v "$PWD/smoke-classes:/smoke:ro" --entrypoint java \
+            ed-fi-kafka-connect:smoke \
+            -cp '/smoke:/kafka/libs/*:/kafka/connect/ed-fi-kafka-connect-transforms/*' \
+            ExpandJsonExecutionSmoke
+
+      # Re-run the same executable smoke inside the stock Kafka 4.x image. The plugin scan above
+      # proves ServiceLoader discovery under Connect 4.x; this proves ExpandJson can execute there
+      # with the Kafka 4.x runtime-provided dependencies instead of only linking.
+      - name: Run the ExpandJson execution smoke inside the Connect 4.x image
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "$PWD/smoke-classes:/smoke:ro" \
+            -v "$PWD/smt-plugin:/smt-plugins/ed-fi-kafka-connect-transforms:ro" \
+            --entrypoint java \
+            apache/kafka:4.3.1@sha256:77e3df9054047a88b520d0cc46e16696d3b22022e1d580aeccd2632df6532837 \
+            -cp '/smoke:/opt/kafka/libs/*:/smt-plugins/ed-fi-kafka-connect-transforms/*' \
+            ExpandJsonExecutionSmoke
+
   build:
     name: Build
     runs-on: ubuntu-latest
@@ -55,6 +218,10 @@ jobs:
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@0bdd871935719febd78681f197cd39af5b6e16a6 # v4.2.2
+        with:
+          # Pin Gradle 8.x: build.gradle's wrapper block imports org.gradle.util classes
+          # (DistributionLocator, GradleVersion) that were removed in Gradle 9. See DMS-1240.
+          gradle-version: "8.10"
 
       - name: Generate Gradle wrapper
         run: gradle wrapper        
