@@ -87,6 +87,13 @@ class DocumentStateUpsertTest {
         assertThat(value).containsEntry("contentVersion", 222L);
         assertThat(value).containsEntry("lastModifiedAt", "2026-07-30T14:15:16Z");
         assertThat(value.get("document")).isInstanceOf(Map.class);
+        assertThat(value.get("documentUuid")).isEqualTo(result.key());
+
+        final Map<String, Object> document = outputDocument(value);
+        assertThat(document)
+                .containsEntry("id", result.key())
+                .containsEntry("_lastModifiedDate", value.get("lastModifiedAt"))
+                .containsEntry("_etag", "222-01234567.j._.l.i");
     }
 
     @ParameterizedTest
@@ -171,6 +178,19 @@ class DocumentStateUpsertTest {
                 malformedRow(
                         DocumentStateTestRecords
                                 .cacheRowBuilder(DocumentState.POSTGRESQL_PROVIDER)
+                                .omit(DocumentStateTestRecords.CONTENT_VERSION_FIELD)
+                                .build(),
+                        DocumentState.FailureReason.MISSING_REQUIRED_FIELD),
+                malformedRow(
+                        DocumentStateTestRecords
+                                .cacheRowBuilder(DocumentState.POSTGRESQL_PROVIDER)
+                                .field(DocumentStateTestRecords.CONTENT_VERSION_FIELD,
+                                        Schema.STRING_SCHEMA, "222")
+                                .build(),
+                        DocumentState.FailureReason.UNSUPPORTED_REQUIRED_FIELD_SHAPE),
+                malformedRow(
+                        DocumentStateTestRecords
+                                .cacheRowBuilder(DocumentState.POSTGRESQL_PROVIDER)
                                 .field(DocumentStateTestRecords.CONTENT_VERSION_FIELD,
                                         SchemaBuilder.float64().build(), 222.5D)
                                 .build(),
@@ -193,6 +213,11 @@ class DocumentStateUpsertTest {
     @SuppressWarnings("unchecked")
     private static Map<String, Object> outputValue(final SourceRecord result) {
         return (Map<String, Object>) result.value();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> outputDocument(final Map<String, Object> value) {
+        return (Map<String, Object>) value.get("document");
     }
 
     private static void assertFailure(final Throwable thrown, final DocumentState.FailureReason expectedReason) {
