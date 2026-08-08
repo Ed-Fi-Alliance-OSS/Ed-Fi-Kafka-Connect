@@ -11,6 +11,7 @@ import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.header.ConnectHeaders;
+import org.apache.kafka.connect.header.Header;
 import org.apache.kafka.connect.header.Headers;
 import org.apache.kafka.connect.source.SourceRecord;
 
@@ -142,8 +143,11 @@ class DocumentStateProgressTest {
         assertThat(result.key()).isEqualTo(PROGRESS_KEY);
         assertThat(result.valueSchema()).isSameAs(record.valueSchema());
         assertThat(result.value()).isSameAs(record.value());
-        assertThat(result.headers()).isSameAs(record.headers());
-        assertThat(result.headers().lastWithName("source-header").value()).isEqualTo("kept");
+        final Header sourceHeader = result.headers().lastWithName("source-header");
+        assertThat(sourceHeader).isNotNull();
+        assertThat(sourceHeader.key()).isEqualTo("source-header");
+        assertThat(sourceHeader.schema()).isSameAs(Schema.STRING_SCHEMA);
+        assertThat(sourceHeader.value()).isEqualTo("kept");
         assertThat(result.timestamp()).isEqualTo(record.timestamp());
         assertThat(result.sourcePartition()).isEqualTo(record.sourcePartition());
         assertThat(result.sourceOffset()).isEqualTo(record.sourceOffset());

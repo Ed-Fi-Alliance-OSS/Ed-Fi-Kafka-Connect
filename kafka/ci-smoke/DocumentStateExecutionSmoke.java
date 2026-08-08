@@ -9,6 +9,7 @@ import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.header.ConnectHeaders;
+import org.apache.kafka.connect.header.Header;
 import org.apache.kafka.connect.header.Headers;
 import org.apache.kafka.connect.source.SourceRecord;
 
@@ -114,8 +115,11 @@ public final class DocumentStateExecutionSmoke {
             expect(out.valueSchema() == null, "progress value schema");
             expect(out.value() == null, "progress value");
             expect(Long.valueOf(321L).equals(out.timestamp()), "progress timestamp");
-            expect(out.headers() == headers, "progress headers preserved");
-            expect("kept".equals(out.headers().lastWithName("source-header").value()), "progress header value");
+            final Header sourceHeader = out.headers().lastWithName("source-header");
+            expect(sourceHeader != null, "progress source-header present");
+            expect("source-header".equals(sourceHeader.key()), "progress header name");
+            expect(sourceHeader.schema() == Schema.STRING_SCHEMA, "progress header schema");
+            expect("kept".equals(sourceHeader.value()), "progress header value");
             expect(record.sourcePartition().equals(out.sourcePartition()), "progress source partition");
             expect(record.sourceOffset().equals(out.sourceOffset()), "progress source offset");
         } finally {
