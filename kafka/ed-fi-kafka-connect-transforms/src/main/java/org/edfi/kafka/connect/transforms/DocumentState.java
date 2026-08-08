@@ -581,7 +581,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
         DROP
     }
 
-    enum FieldKind {
+    private enum FieldKind {
         PLAIN_STRING,
         DOCUMENT_JSON
     }
@@ -761,7 +761,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
         }
     }
 
-    static final class DebeziumSourceAdapter {
+    private static final class DebeziumSourceAdapter {
         private final Provider provider;
         private final String sourceSchemaName;
 
@@ -770,7 +770,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
             this.sourceSchemaName = sourceSchemaName;
         }
 
-        public SourceMetadata sourceMetadata(final ConnectRecord<?> record) {
+        SourceMetadata sourceMetadata(final ConnectRecord<?> record) {
             final Struct value = requireStructValue(record, provider);
             final Schema valueSchema = requireValueSchema(record, provider);
             final var sourceField = valueSchema.field(SOURCE_FIELD);
@@ -807,7 +807,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
                     SourceCategory.RELATIONAL, sourceTable, sourceSchema, sourceTable.tableName(), provider);
         }
 
-        public ValidatedDocumentKey documentKey(
+        ValidatedDocumentKey documentKey(
                 final ConnectRecord<?> record, final ClassifiedRecord classifiedRecord) {
             final Object key = record.key();
             if (key == null) {
@@ -825,13 +825,13 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
             return new ValidatedDocumentKey(documentUuid);
         }
 
-        public String cacheRowDocumentUuid(
+        String cacheRowDocumentUuid(
                 final ConnectRecord<?> record, final ClassifiedRecord classifiedRecord) {
             return documentUuid(retainedAfterStruct(record, classifiedRecord), record, classifiedRecord,
                     FailureReason.UNSUPPORTED_DOCUMENT_UUID_SHAPE);
         }
 
-        public Map<String, Object> publicUpsertValue(
+        Map<String, Object> publicUpsertValue(
                 final ConnectRecord<?> record,
                 final ClassifiedRecord classifiedRecord,
                 final ValidatedDocumentKey documentKey) {
@@ -852,7 +852,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
             return value;
         }
 
-        public void validateDeleteBeforeDocumentUuid(
+        void validateDeleteBeforeDocumentUuid(
                 final ConnectRecord<?> record,
                 final ClassifiedRecord classifiedRecord,
                 final ValidatedDocumentKey documentKey) {
