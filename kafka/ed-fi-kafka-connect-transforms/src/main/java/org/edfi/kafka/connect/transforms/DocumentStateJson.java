@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.apache.kafka.connect.connector.ConnectRecord;
+import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.header.ConnectHeaders;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -53,6 +54,15 @@ final class DocumentStateJson {
         return record.newRecord(
                 targetTopic, null, documentKey.schema(), documentKey.value(), null, null, null,
                 new ConnectHeaders());
+    }
+
+    static <R extends ConnectRecord<R>> R progressRecord(
+            final R record,
+            final String progressTopic,
+            final String progressKey) {
+        return record.newRecord(
+                progressTopic, null, Schema.STRING_SCHEMA, progressKey, record.valueSchema(), record.value(),
+                record.timestamp(), record.headers());
     }
 
     static Map<String, Object> parseDocumentJson(

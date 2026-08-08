@@ -66,6 +66,29 @@ final class DocumentStateTestRecords {
                 new ConnectHeaders());
     }
 
+    static SourceRecord cdcHeartbeatRecord(
+            final String provider,
+            final String operation,
+            final Schema keySchema,
+            final Object key,
+            final Long timestamp,
+            final Headers headers) {
+        return relationalRecord(provider, "CdcHeartbeat", operation, null, null, timestamp, headers, keySchema, key);
+    }
+
+    static SourceRecord nativeHeartbeatRecord(
+            final String topic,
+            final Schema keySchema,
+            final Object key,
+            final Schema valueSchema,
+            final Object value,
+            final Long timestamp,
+            final Headers headers) {
+        return new SourceRecord(
+                sourcePartition(), sourceOffset(), topic, null,
+                keySchema, key, valueSchema, value, timestamp, headers);
+    }
+
     static SourceRecord documentDeleteRecord(final String provider, final Struct before) {
         final Schema beforeSchema = before == null ? null : before.schema();
         return documentDeleteRecord(provider, DOCUMENT_UUID, beforeSchema, before, null, new ConnectHeaders());
@@ -172,6 +195,25 @@ final class DocumentStateTestRecords {
             final Struct row,
             final Long timestamp,
             final Headers headers) {
+        final Schema keySchema = keyStructSchema(provider);
+        final Struct key = documentUuid == null
+                ? null
+                : new Struct(keySchema).put(DOCUMENT_UUID_FIELD, documentUuid);
+        return relationalRecord(
+                provider, sourceTable, operation, rowSchema, row, timestamp, headers,
+                key == null ? null : keySchema, key);
+    }
+
+    private static SourceRecord relationalRecord(
+            final String provider,
+            final String sourceTable,
+            final String operation,
+            final Schema rowSchema,
+            final Struct row,
+            final Long timestamp,
+            final Headers headers,
+            final Schema keySchema,
+            final Object key) {
         final Schema sourceStructSchema = sourceSchema(sourceSchemaName(provider));
         final Schema valueSchema = SchemaBuilder.struct()
                 .field("source", sourceStructSchema)
@@ -195,13 +237,9 @@ final class DocumentStateTestRecords {
         if (rowSchema != null && row != null) {
             valueWithRow.put(rowFieldName(sourceTable, operation), row);
         }
-        final Schema keySchema = keyStructSchema(provider);
-        final Struct key = documentUuid == null
-                ? null
-                : new Struct(keySchema).put(DOCUMENT_UUID_FIELD, documentUuid);
         return new SourceRecord(
                 sourcePartition(), sourceOffset(), "server.dms." + sourceTable, null,
-                key == null ? null : keySchema, key,
+                keySchema, key,
                 rowSchema == null ? valueSchema : valueSchemaWithRow, valueWithRow, timestamp, headers);
     }
 

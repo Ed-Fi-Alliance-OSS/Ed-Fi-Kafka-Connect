@@ -27,6 +27,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
 
     private static final String PROGRESS_TOPIC_SUFFIX = ".cdc-progress";
     private static final String NATIVE_HEARTBEAT_TOPIC_PREFIX = "__debezium-heartbeat.";
+    private static final String PROGRESS_KEY = "cdc-progress";
 
     private static final String SOURCE_FIELD = "source";
     private static final String SOURCE_SCHEMA_FIELD = "schema";
@@ -114,6 +115,9 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
             }
             return publicTombstone(record, classifiedRecord, documentKey);
         }
+        if (classifiedRecord.outputKind() == OutputKind.PROGRESS) {
+            return progress(record);
+        }
         throw transformationFailure(
                 FailureReason.OUTPUT_NOT_IMPLEMENTED, settings.provider(), record, classifiedRecord);
     }
@@ -166,6 +170,10 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
             final ValidatedDocumentKey documentKey) {
         settings.sourceAdapter().validateDeleteBeforeDocumentUuid(record, classifiedRecord, documentKey);
         return DocumentStateJson.publicTombstoneRecord(record, settings.targetTopic(), documentKey);
+    }
+
+    private R progress(final R record) {
+        return DocumentStateJson.progressRecord(record, settings.progressTopic(), PROGRESS_KEY);
     }
 
     private static void validateProviderConfig(final String name, final Object value) {
