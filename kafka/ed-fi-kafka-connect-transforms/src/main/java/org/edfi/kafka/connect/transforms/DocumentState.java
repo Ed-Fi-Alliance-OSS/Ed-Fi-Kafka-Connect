@@ -5,6 +5,8 @@
 
 package org.edfi.kafka.connect.transforms;
 
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 import org.apache.kafka.common.config.AbstractConfig;
@@ -40,6 +42,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
     private static final String PROJECTION_WORK_TABLE = "DocumentProjectionWork";
     private static final String POSTGRESQL_SOURCE_SCHEMA_NAME = "io.debezium.connector.postgresql.Source";
     private static final String SQLSERVER_SOURCE_SCHEMA_NAME = "io.debezium.connector.sqlserver.Source";
+    private static final int MAX_METADATA_VALUE_LENGTH = 128;
 
     private static final ConfigDef.Validator PROVIDER_VALIDATOR = (name, value) -> {
         if (!(POSTGRESQL_PROVIDER.equals(value) || SQLSERVER_PROVIDER.equals(value))) {
@@ -93,8 +96,8 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
         if (classifiedRecord.outputKind() == OutputKind.DROP) {
             return null;
         }
-        throw new DataException("DocumentState " + classifiedRecord.outputKind()
-                + " record transformation is not implemented");
+        throw transformationFailure(
+                FailureReason.OUTPUT_NOT_IMPLEMENTED, settings.provider(), record, classifiedRecord);
     }
 
     @Override
@@ -107,7 +110,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
 
     ClassifiedRecord classify(final R record) {
         if (settings == null) {
-            throw new DataException("DocumentState must be configured before transforming records");
+            throw transformationFailure(FailureReason.NOT_CONFIGURED, null, record, null, null);
         }
         if (isNativeHeartbeat(record)) {
             return ClassifiedRecord.nativeHeartbeat();
@@ -148,31 +151,40 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
         final Schema valueSchema = requireValueSchema(record);
         final Field operationField = valueSchema.field(OPERATION_FIELD);
         if (operationField == null) {
-            throw transformationFailure("missing operation metadata", record, sourceMetadata, null);
+            throw transformationFailure(FailureReason.MISSING_OPERATION_METADATA, record, sourceMetadata, null);
         }
         if (operationField.schema().type() != Schema.Type.STRING || operationField.schema().isOptional()) {
-            throw transformationFailure("unsupported operation metadata shape", record, sourceMetadata, null);
+            throw transformationFailure(
+                    FailureReason.UNSUPPORTED_OPERATION_METADATA_SHAPE, record, sourceMetadata, null);
         }
 
         final Object operation = requireStructValue(record).getWithoutDefault(OPERATION_FIELD);
         if (!(operation instanceof String)) {
-            throw transformationFailure("missing operation metadata", record, sourceMetadata, operation);
+            throw transformationFailure(FailureReason.MISSING_OPERATION_METADATA, record, sourceMetadata, operation);
         }
         return SourceOperation.fromCode((String) operation, record, sourceMetadata);
     }
 
     private static Schema requireValueSchema(final ConnectRecord<?> record) {
+        return requireValueSchema(record, null);
+    }
+
+    private static Schema requireValueSchema(final ConnectRecord<?> record, final Provider provider) {
         final Schema valueSchema = record.valueSchema();
         if (valueSchema == null) {
-            throw transformationFailure("missing source metadata", record, null, null);
+            throw transformationFailure(FailureReason.MISSING_SOURCE_METADATA, provider, record, null, null);
         }
         return valueSchema;
     }
 
     private static Struct requireStructValue(final ConnectRecord<?> record) {
+        return requireStructValue(record, null);
+    }
+
+    private static Struct requireStructValue(final ConnectRecord<?> record, final Provider provider) {
         final Object value = record.value();
         if (!(value instanceof Struct)) {
-            throw transformationFailure("missing source metadata", record, null, null);
+            throw transformationFailure(FailureReason.MISSING_SOURCE_METADATA, provider, record, null, null);
         }
         return (Struct) value;
     }
@@ -188,7 +200,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
                 return heartbeatOutputKind(sourceMetadata, sourceOperation);
             default:
                 throw transformationFailure(
-                        "unsupported source table", null, sourceMetadata, sourceOperation.code());
+                        FailureReason.UNSUPPORTED_SOURCE_TABLE, null, sourceMetadata, sourceOperation.code());
         }
     }
 
@@ -202,7 +214,8 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
             case TRUNCATE:
                 return OutputKind.DROP;
             default:
-                throw transformationFailure("unsupported source operation", null, null, sourceOperation.code());
+                throw transformationFailure(
+                        FailureReason.UNSUPPORTED_SOURCE_OPERATION, null, null, sourceOperation.code());
         }
     }
 
@@ -216,7 +229,8 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
             case TRUNCATE:
                 return OutputKind.DROP;
             default:
-                throw transformationFailure("unsupported source operation", null, null, sourceOperation.code());
+                throw transformationFailure(
+                        FailureReason.UNSUPPORTED_SOURCE_OPERATION, null, null, sourceOperation.code());
         }
     }
 
@@ -231,38 +245,148 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
             case TRUNCATE:
             default:
                 throw transformationFailure(
-                        "unsupported source operation", null, sourceMetadata, sourceOperation.code());
+                        FailureReason.UNSUPPORTED_SOURCE_OPERATION, null, sourceMetadata, sourceOperation.code());
         }
     }
 
-    private static DataException transformationFailure(
-            final String reason,
+    private static TransformationFailureException transformationFailure(
+            final FailureReason reason,
             final ConnectRecord<?> record,
             final SourceMetadata sourceMetadata,
             final Object operation) {
-        final StringBuilder message = new StringBuilder("DocumentState transformation failure");
-        append(message, "reason", reason);
-        if (record != null) {
-            append(message, "sourceTopic", record.topic());
-        }
-        if (sourceMetadata != null) {
-            append(message, "sourceCategory", sourceMetadata.sourceCategory());
-            append(message, "sourceSchema", sourceMetadata.sourceSchema());
-            append(message, "sourceTable", sourceMetadata.sourceTableName());
-        }
-        if (operation != null) {
-            append(message, "operation", operation);
-        }
-        return new DataException(message.toString());
+        final Provider provider = sourceMetadata == null ? null : sourceMetadata.provider();
+        return transformationFailure(reason, provider, record, sourceMetadata, operation);
     }
 
-    private static void append(final StringBuilder message, final String name, final Object value) {
-        message.append("; ").append(name).append('=').append(value);
+    private static TransformationFailureException transformationFailure(
+            final FailureReason reason,
+            final Provider provider,
+            final ConnectRecord<?> record,
+            final SourceMetadata sourceMetadata,
+            final Object operation) {
+        final Map<String, String> metadata = failureMetadata(provider, record);
+        if (sourceMetadata != null) {
+            appendMetadata(metadata, "sourceCategory", sourceMetadata.sourceCategory());
+            appendMetadata(metadata, "sourceSchema", sourceMetadata.sourceSchema());
+            appendMetadata(metadata, "sourceTable", sourceMetadata.sourceTableName());
+        }
+        appendMetadata(metadata, "operation", operation);
+        return new TransformationFailureException(reason, metadata);
+    }
+
+    private static TransformationFailureException transformationFailure(
+            final FailureReason reason,
+            final Provider provider,
+            final ConnectRecord<?> record,
+            final ClassifiedRecord classifiedRecord) {
+        final Map<String, String> metadata = failureMetadata(provider, record);
+        if (classifiedRecord != null) {
+            appendMetadata(metadata, "sourceCategory", classifiedRecord.sourceCategory());
+            if (classifiedRecord.sourceTable() != null) {
+                appendMetadata(metadata, "sourceTable", classifiedRecord.sourceTable().tableName());
+            }
+            if (classifiedRecord.sourceOperation() != null) {
+                appendMetadata(metadata, "operation", classifiedRecord.sourceOperation().code());
+            }
+        }
+        return new TransformationFailureException(reason, metadata);
+    }
+
+    private static Map<String, String> failureMetadata(final Provider provider, final ConnectRecord<?> record) {
+        final Map<String, String> metadata = new LinkedHashMap<>();
+        if (provider != null) {
+            appendMetadata(metadata, "provider", provider.configValue());
+        }
+        if (record != null) {
+            appendMetadata(metadata, "sourceTopic", record.topic());
+        }
+        return metadata;
+    }
+
+    private static void appendMetadata(final Map<String, String> metadata, final String name, final Object value) {
+        if (value != null) {
+            metadata.put(name, sanitizeMetadataValue(value));
+        }
+    }
+
+    private static String sanitizeMetadataValue(final Object value) {
+        final String rawValue = String.valueOf(value);
+        final StringBuilder sanitized = new StringBuilder(rawValue.length());
+        for (int i = 0; i < rawValue.length(); i++) {
+            final char character = rawValue.charAt(i);
+            sanitized.append(Character.isISOControl(character) ? '?' : character);
+        }
+        if (sanitized.length() <= MAX_METADATA_VALUE_LENGTH) {
+            return sanitized.toString();
+        }
+        return sanitized.substring(0, MAX_METADATA_VALUE_LENGTH - 3) + "...";
     }
 
     enum Provider {
-        POSTGRESQL,
-        SQLSERVER
+        POSTGRESQL(POSTGRESQL_PROVIDER),
+        SQLSERVER(SQLSERVER_PROVIDER);
+
+        private final String configValue;
+
+        Provider(final String configValue) {
+            this.configValue = configValue;
+        }
+
+        String configValue() {
+            return configValue;
+        }
+    }
+
+    public enum FailureReason {
+        NOT_CONFIGURED("not configured"),
+        MISSING_SOURCE_METADATA("missing source metadata"),
+        UNSUPPORTED_SOURCE_METADATA_SHAPE("unsupported source metadata shape"),
+        MISSING_OPERATION_METADATA("missing operation metadata"),
+        UNSUPPORTED_OPERATION_METADATA_SHAPE("unsupported operation metadata shape"),
+        UNKNOWN_OPERATION_CODE("unknown operation code"),
+        UNSUPPORTED_SOURCE_SCHEMA("unsupported source schema"),
+        UNSUPPORTED_SOURCE_TABLE("unsupported source table"),
+        UNEXPECTED_RETAINED_SOURCE_TABLE("unexpected retained source table"),
+        UNSUPPORTED_SOURCE_OPERATION("unsupported source operation"),
+        OUTPUT_NOT_IMPLEMENTED("output transformation is not implemented");
+
+        private final String description;
+
+        FailureReason(final String description) {
+            this.description = description;
+        }
+
+        String description() {
+            return description;
+        }
+    }
+
+    public static final class TransformationFailureException extends DataException {
+        private final FailureReason reason;
+        private final Map<String, String> metadata;
+
+        private TransformationFailureException(final FailureReason reason, final Map<String, String> metadata) {
+            super(message(reason, metadata));
+            this.reason = reason;
+            this.metadata = Collections.unmodifiableMap(new LinkedHashMap<>(metadata));
+        }
+
+        public FailureReason reason() {
+            return reason;
+        }
+
+        public Map<String, String> metadata() {
+            return metadata;
+        }
+
+        private static String message(final FailureReason reason, final Map<String, String> metadata) {
+            final StringBuilder message = new StringBuilder("DocumentState transformation failure: ");
+            message.append(reason.description()).append("; reasonCode=").append(reason);
+            for (final Map.Entry<String, String> entry : metadata.entrySet()) {
+                message.append("; ").append(entry.getKey()).append('=').append(entry.getValue());
+            }
+            return message.toString();
+        }
     }
 
     enum SourceCategory {
@@ -297,9 +421,10 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
                 return HEARTBEAT;
             }
             if (PROJECTION_WORK_TABLE.equals(tableName)) {
-                throw transformationFailure("unexpected retained source table", record, sourceMetadata, null);
+                throw transformationFailure(
+                        FailureReason.UNEXPECTED_RETAINED_SOURCE_TABLE, record, sourceMetadata, null);
             }
-            throw transformationFailure("unsupported source table", record, sourceMetadata, null);
+            throw transformationFailure(FailureReason.UNSUPPORTED_SOURCE_TABLE, record, sourceMetadata, null);
         }
     }
 
@@ -327,7 +452,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
                     return sourceOperation;
                 }
             }
-            throw transformationFailure("unknown operation code", record, sourceMetadata, code);
+            throw transformationFailure(FailureReason.UNKNOWN_OPERATION_CODE, record, sourceMetadata, code);
         }
     }
 
@@ -389,16 +514,19 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
         private final SourceTable sourceTable;
         private final String sourceSchema;
         private final String sourceTableName;
+        private final Provider provider;
 
         SourceMetadata(
                 final SourceCategory sourceCategory,
                 final SourceTable sourceTable,
                 final String sourceSchema,
-                final String sourceTableName) {
+                final String sourceTableName,
+                final Provider provider) {
             this.sourceCategory = sourceCategory;
             this.sourceTable = sourceTable;
             this.sourceSchema = sourceSchema;
             this.sourceTableName = sourceTableName;
+            this.provider = provider;
         }
 
         SourceCategory sourceCategory() {
@@ -416,6 +544,10 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
         String sourceTableName() {
             return sourceTableName;
         }
+
+        Provider provider() {
+            return provider;
+        }
     }
 
     interface SourceAdapter {
@@ -423,45 +555,50 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
     }
 
     static final class DebeziumSourceAdapter implements SourceAdapter {
+        private final Provider provider;
         private final String sourceSchemaName;
 
-        DebeziumSourceAdapter(final String sourceSchemaName) {
+        DebeziumSourceAdapter(final Provider provider, final String sourceSchemaName) {
+            this.provider = provider;
             this.sourceSchemaName = sourceSchemaName;
         }
 
         @Override
         public SourceMetadata sourceMetadata(final ConnectRecord<?> record) {
-            final Struct value = requireStructValue(record);
-            final Schema valueSchema = requireValueSchema(record);
+            final Struct value = requireStructValue(record, provider);
+            final Schema valueSchema = requireValueSchema(record, provider);
             final Field sourceField = valueSchema.field(SOURCE_FIELD);
             if (sourceField == null) {
-                throw transformationFailure("missing source metadata", record, null, null);
+                throw transformationFailure(FailureReason.MISSING_SOURCE_METADATA, provider, record, null, null);
             }
             if (sourceField.schema().type() != Schema.Type.STRUCT
                     || !sourceSchemaName.equals(sourceField.schema().name())
                     || sourceField.schema().isOptional()) {
-                throw transformationFailure("unsupported source metadata shape", record, null, null);
+                throw transformationFailure(
+                        FailureReason.UNSUPPORTED_SOURCE_METADATA_SHAPE, provider, record, null, null);
             }
 
             final Object source = value.getWithoutDefault(SOURCE_FIELD);
             if (!(source instanceof Struct)) {
-                throw transformationFailure("missing source metadata", record, null, null);
+                throw transformationFailure(FailureReason.MISSING_SOURCE_METADATA, provider, record, null, null);
             }
             final Struct sourceStruct = (Struct) source;
             if (!sourceSchemaName.equals(sourceStruct.schema().name())) {
-                throw transformationFailure("unsupported source metadata shape", record, null, null);
+                throw transformationFailure(
+                        FailureReason.UNSUPPORTED_SOURCE_METADATA_SHAPE, provider, record, null, null);
             }
 
             final String sourceSchema = sourceString(sourceStruct, SOURCE_SCHEMA_FIELD, record, null);
             final String sourceTableName = sourceString(sourceStruct, SOURCE_TABLE_FIELD, record, null);
             final SourceMetadata unclassified = new SourceMetadata(
-                    SourceCategory.RELATIONAL, null, sourceSchema, sourceTableName);
+                    SourceCategory.RELATIONAL, null, sourceSchema, sourceTableName, provider);
             if (!RELATIONAL_SCHEMA.equals(sourceSchema)) {
-                throw transformationFailure("unsupported source schema", record, unclassified, null);
+                throw transformationFailure(FailureReason.UNSUPPORTED_SOURCE_SCHEMA, record, unclassified, null);
             }
 
             final SourceTable sourceTable = SourceTable.fromName(sourceTableName, record, unclassified);
-            return new SourceMetadata(SourceCategory.RELATIONAL, sourceTable, sourceSchema, sourceTable.tableName());
+            return new SourceMetadata(
+                    SourceCategory.RELATIONAL, sourceTable, sourceSchema, sourceTable.tableName(), provider);
         }
 
         private String sourceString(
@@ -471,11 +608,13 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
                 final SourceMetadata sourceMetadata) {
             final Field field = sourceStruct.schema().field(fieldName);
             if (field == null || field.schema().type() != Schema.Type.STRING || field.schema().isOptional()) {
-                throw transformationFailure("unsupported source metadata shape", record, sourceMetadata, null);
+                throw transformationFailure(
+                        FailureReason.UNSUPPORTED_SOURCE_METADATA_SHAPE, provider, record, sourceMetadata, null);
             }
             final Object value = sourceStruct.getWithoutDefault(fieldName);
             if (!(value instanceof String) || ((String) value).isEmpty()) {
-                throw transformationFailure("missing source metadata", record, sourceMetadata, null);
+                throw transformationFailure(FailureReason.MISSING_SOURCE_METADATA, provider, record, sourceMetadata,
+                        null);
             }
             return (String) value;
         }
@@ -512,10 +651,10 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
 
         private static SourceAdapter sourceAdapter(final Provider provider) {
             if (provider == Provider.POSTGRESQL) {
-                return new DebeziumSourceAdapter(POSTGRESQL_SOURCE_SCHEMA_NAME);
+                return new DebeziumSourceAdapter(provider, POSTGRESQL_SOURCE_SCHEMA_NAME);
             }
             if (provider == Provider.SQLSERVER) {
-                return new DebeziumSourceAdapter(SQLSERVER_SOURCE_SCHEMA_NAME);
+                return new DebeziumSourceAdapter(provider, SQLSERVER_SOURCE_SCHEMA_NAME);
             }
             throw new ConfigException(PROVIDER_CONFIG, provider, "must be exactly 'postgresql' or 'sqlserver'");
         }
