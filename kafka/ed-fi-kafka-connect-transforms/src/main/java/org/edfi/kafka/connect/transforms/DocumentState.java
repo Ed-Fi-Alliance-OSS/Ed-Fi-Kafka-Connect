@@ -856,30 +856,17 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
                 final ConnectRecord<?> record,
                 final ClassifiedRecord classifiedRecord,
                 final ValidatedDocumentKey documentKey) {
-            final Schema valueSchema = requireValueSchema(record, provider);
-            final var beforeField = valueSchema.field(BEFORE_FIELD);
-            if (beforeField == null) {
+            final Struct beforeStruct = deleteBeforeStruct(record, classifiedRecord);
+            if (beforeStruct == null) {
                 return;
             }
-            if (beforeField.schema().type() != Schema.Type.STRUCT) {
-                throw classifiedFailure(FailureReason.UNSUPPORTED_RETAINED_ROW_SHAPE, record, classifiedRecord);
-            }
 
-            final Object before = requireStructValue(record, provider).getWithoutDefault(BEFORE_FIELD);
-            if (before == null) {
-                return;
-            }
-            if (!(before instanceof Struct)) {
-                throw classifiedFailure(FailureReason.UNSUPPORTED_RETAINED_ROW_SHAPE, record, classifiedRecord);
-            }
-
-            final Struct beforeStruct = (Struct) before;
             final var documentUuidField = beforeStruct.schema().field(DOCUMENT_UUID_FIELD);
             if (documentUuidField == null) {
                 return;
             }
             final Object beforeDocumentUuid = beforeStruct.getWithoutDefault(DOCUMENT_UUID_FIELD);
-            if (beforeDocumentUuid == null || SQLSERVER_UNAVAILABLE_VALUE.equals(beforeDocumentUuid)) {
+            if (isAbsentDeleteBeforeDocumentUuid(beforeDocumentUuid, documentUuidField.schema())) {
                 return;
             }
 
@@ -888,6 +875,38 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
             if (!documentKey.value().equals(normalizedBeforeDocumentUuid)) {
                 throw classifiedFailure(FailureReason.DOCUMENT_UUID_MISMATCH, record, classifiedRecord);
             }
+        }
+
+        private Struct deleteBeforeStruct(
+                final ConnectRecord<?> record,
+                final ClassifiedRecord classifiedRecord) {
+            final Schema valueSchema = requireValueSchema(record, provider);
+            final var beforeField = valueSchema.field(BEFORE_FIELD);
+            if (beforeField == null) {
+                return null;
+            }
+            if (beforeField.schema().type() != Schema.Type.STRUCT) {
+                throw classifiedFailure(FailureReason.UNSUPPORTED_RETAINED_ROW_SHAPE, record, classifiedRecord);
+            }
+
+            final Object before = requireStructValue(record, provider).getWithoutDefault(BEFORE_FIELD);
+            if (before == null) {
+                return null;
+            }
+            if (!(before instanceof Struct)) {
+                throw classifiedFailure(FailureReason.UNSUPPORTED_RETAINED_ROW_SHAPE, record, classifiedRecord);
+            }
+            return (Struct) before;
+        }
+
+        private boolean isAbsentDeleteBeforeDocumentUuid(final Object value, final Schema schema) {
+            return value == null
+                    || (SQLSERVER_UNAVAILABLE_VALUE.equals(value)
+                            && isPinnedSqlServerUnavailableBeforeDocumentUuid(schema));
+        }
+
+        private boolean isPinnedSqlServerUnavailableBeforeDocumentUuid(final Schema schema) {
+            return provider == Provider.SQLSERVER && isPinnedDocumentUuidSchema(schema);
         }
 
         private Struct retainedAfterStruct(

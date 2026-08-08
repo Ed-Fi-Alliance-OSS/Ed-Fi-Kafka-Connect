@@ -21,6 +21,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
 
 class DocumentStateTombstoneTest {
+    private static final String SQLSERVER_UNAVAILABLE_VALUE = "__debezium_unavailable_value";
 
     @ParameterizedTest
     @MethodSource("providers")
@@ -67,6 +68,60 @@ class DocumentStateTombstoneTest {
                 .apply(record));
 
         assertFailure(thrown, DocumentState.FailureReason.DOCUMENT_UUID_MISMATCH, "Document");
+    }
+
+    @Test
+    void Given_Postgresql_Document_Delete_Before_DocumentUuid_Unavailable_Marker_Should_Fail() {
+        final Schema beforeSchema = DocumentStateTestRecords.documentBeforeRowSchema(
+                DocumentState.POSTGRESQL_PROVIDER,
+                DocumentStateTestRecords.pinnedUuidSchema(DocumentState.POSTGRESQL_PROVIDER));
+        final SourceRecord record = DocumentStateTestRecords.documentDeleteRecordWithBeforeSchema(
+                DocumentState.POSTGRESQL_PROVIDER,
+                beforeSchema,
+                DocumentStateTestRecords.documentBeforeRow(beforeSchema, SQLSERVER_UNAVAILABLE_VALUE));
+
+        final Throwable thrown = catchThrowable(() -> DocumentStateTestRecords
+                .configuredTransform(DocumentState.POSTGRESQL_PROVIDER)
+                .apply(record));
+
+        assertFailure(thrown, DocumentState.FailureReason.INVALID_DOCUMENT_UUID, "Document");
+    }
+
+    @Test
+    void Given_SqlServer_Document_Delete_Before_DocumentUuid_Unavailable_Marker_With_NonPinned_Shape_Should_Fail() {
+        final Schema beforeSchema = DocumentStateTestRecords.documentBeforeRowSchema(
+                DocumentState.SQLSERVER_PROVIDER,
+                SchemaBuilder.string().name(DocumentStateTestRecords.POSTGRESQL_UUID_SCHEMA).build());
+        final SourceRecord record = DocumentStateTestRecords.documentDeleteRecordWithBeforeSchema(
+                DocumentState.SQLSERVER_PROVIDER,
+                beforeSchema,
+                DocumentStateTestRecords.documentBeforeRow(beforeSchema, SQLSERVER_UNAVAILABLE_VALUE));
+
+        final Throwable thrown = catchThrowable(() -> DocumentStateTestRecords
+                .configuredTransform(DocumentState.SQLSERVER_PROVIDER)
+                .apply(record));
+
+        assertFailure(thrown, DocumentState.FailureReason.UNSUPPORTED_DOCUMENT_UUID_SHAPE, "Document");
+    }
+
+    @Test
+    void Given_SqlServer_Document_Delete_Before_DocumentUuid_Unavailable_Marker_With_Pinned_Shape_Should_Succeed() {
+        final Schema beforeSchema = DocumentStateTestRecords.documentBeforeRowSchema(
+                DocumentState.SQLSERVER_PROVIDER,
+                DocumentStateTestRecords.pinnedUuidSchema(DocumentState.SQLSERVER_PROVIDER));
+        final SourceRecord record = DocumentStateTestRecords.documentDeleteRecordWithBeforeSchema(
+                DocumentState.SQLSERVER_PROVIDER,
+                beforeSchema,
+                DocumentStateTestRecords.documentBeforeRow(beforeSchema, SQLSERVER_UNAVAILABLE_VALUE));
+
+        final SourceRecord result = DocumentStateTestRecords
+                .configuredTransform(DocumentState.SQLSERVER_PROVIDER)
+                .apply(record);
+
+        assertThat(result.topic()).isEqualTo(DocumentStateTestRecords.TARGET_TOPIC);
+        assertThat(result.key()).isEqualTo(DocumentStateTestRecords.DOCUMENT_UUID);
+        assertThat(result.valueSchema()).isNull();
+        assertThat(result.value()).isNull();
     }
 
     @ParameterizedTest
@@ -193,8 +248,9 @@ class DocumentStateTombstoneTest {
         return new Object[] {
             provider,
             DocumentStateTestRecords.documentDeleteRecordWithBeforeSchema(
-                    provider, beforeSchema,
-                    DocumentStateTestRecords.documentBeforeRow(beforeSchema, "__debezium_unavailable_value"))
+                    provider,
+                    beforeSchema,
+                    DocumentStateTestRecords.documentBeforeRow(beforeSchema, SQLSERVER_UNAVAILABLE_VALUE))
         };
     }
 
