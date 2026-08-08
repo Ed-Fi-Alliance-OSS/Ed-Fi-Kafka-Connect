@@ -105,9 +105,9 @@ gradle-wrapper.jar in the gradle\wrapper folder `> gradle wrapper`
 
 This project includes a series of *gradle* tasks:
 
-- `./gradlew build`: Compile code
+- `./gradlew build -PedfiDmsMaterializedDocumentFixtureRoot=<DMS checkout>/src/dms/backend/Fixtures/document-cache/materialized-documents`: Compile code
 
-- `./gradlew test`: Run unit tests
+- `./gradlew test -PedfiDmsMaterializedDocumentFixtureRoot=<DMS checkout>/src/dms/backend/Fixtures/document-cache/materialized-documents`: Run unit tests
 
 - `./gradlew installDist`: Creates a jar distributable file, located under
   `/build/install/ed-fi-kafka-connect-transforms/ed-fi-kafka-connect-transforms-{version}.jar`
