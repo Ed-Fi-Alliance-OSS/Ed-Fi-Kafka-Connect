@@ -155,18 +155,11 @@ final class DocumentStateJson {
             final JsonNode node,
             final ConnectRecord<?> record,
             final DocumentState.ClassifiedRecord classifiedRecord) {
-        if (node.isIntegralNumber()) {
-            if (!node.canConvertToLong()) {
-                throw failure(DocumentState.FailureReason.INVALID_DOCUMENT_JSON, record, classifiedRecord);
-            }
-            return node.asLong();
-        }
-
-        final double value = node.asDouble();
-        if (!Double.isFinite(value)) {
+        if (!node.isIntegralNumber() || !node.canConvertToLong()) {
             throw failure(DocumentState.FailureReason.INVALID_DOCUMENT_JSON, record, classifiedRecord);
         }
-        return value;
+
+        return node.asLong();
     }
 
     private static DocumentState.TransformationFailureException failure(

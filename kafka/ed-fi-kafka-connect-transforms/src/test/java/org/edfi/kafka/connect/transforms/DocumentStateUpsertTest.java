@@ -6,6 +6,7 @@
 package org.edfi.kafka.connect.transforms;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
 
@@ -96,6 +97,50 @@ class DocumentStateUpsertTest {
                 .containsEntry("_etag", "222-01234567.j._.l.i");
     }
 
+    @Test
+    void Given_DocumentJson_Integral_Numbers_Should_Emit_Long_Values() {
+        final Struct after = DocumentStateTestRecords
+                .cacheRowBuilder(DocumentState.POSTGRESQL_PROVIDER)
+                .field(
+                        DocumentStateTestRecords.DOCUMENT_JSON_FIELD,
+                        DocumentStateTestRecords.documentJsonSchema(DocumentState.POSTGRESQL_PROVIDER),
+                        "{\"id\":\"" + DocumentStateTestRecords.DOCUMENT_UUID
+                                + "\",\"_lastModifiedDate\":\"2026-07-30T14:15:16Z\","
+                                + "\"schoolId\":255901,\"nested\":{\"count\":0},"
+                                + "\"scores\":[1,9223372036854775807]}")
+                .build();
+
+        final SourceRecord result = DocumentStateTestRecords
+                .configuredTransform(DocumentState.POSTGRESQL_PROVIDER)
+                .apply(DocumentStateTestRecords.documentCacheRecord(DocumentState.POSTGRESQL_PROVIDER, after));
+
+        final Map<String, Object> document = outputDocument(outputValue(result));
+        assertThat(document).containsEntry("schoolId", 255901L);
+        final Map<?, ?> nested = (Map<?, ?>) document.get("nested");
+        assertThat(nested.get("count")).isEqualTo(0L);
+        final List<?> scores = (List<?>) document.get("scores");
+        assertThat(scores).isEqualTo(List.of(1L, Long.MAX_VALUE));
+    }
+
+    @Test
+    void Given_DocumentJson_High_Precision_Decimal_Should_Fail_Without_Rounded_Public_Output() {
+        final Struct after = DocumentStateTestRecords
+                .cacheRowBuilder(DocumentState.POSTGRESQL_PROVIDER)
+                .field(
+                        DocumentStateTestRecords.DOCUMENT_JSON_FIELD,
+                        DocumentStateTestRecords.documentJsonSchema(DocumentState.POSTGRESQL_PROVIDER),
+                        "{\"id\":\"" + DocumentStateTestRecords.DOCUMENT_UUID
+                                + "\",\"_lastModifiedDate\":\"2026-07-30T14:15:16Z\","
+                                + "\"gradePointAverage\":3.141592653589793238462643383279}")
+                .build();
+
+        final Throwable thrown = catchThrowable(() -> DocumentStateTestRecords
+                .configuredTransform(DocumentState.POSTGRESQL_PROVIDER)
+                .apply(DocumentStateTestRecords.documentCacheRecord(DocumentState.POSTGRESQL_PROVIDER, after)));
+
+        assertFailure(thrown, DocumentState.FailureReason.INVALID_DOCUMENT_JSON);
+    }
+
     @ParameterizedTest
     @MethodSource("malformedDocumentJsonRows")
     void Given_Malformed_DocumentJson_Should_Fail_With_Stable_Reason(
@@ -147,6 +192,11 @@ class DocumentStateUpsertTest {
                         "{\"id\":\"" + DocumentStateTestRecords.DOCUMENT_UUID
                                 + "\",\"_lastModifiedDate\":\"2026-07-30T14:15:17Z\"}",
                         DocumentState.FailureReason.PUBLIC_DOCUMENT_INVARIANT_MISMATCH),
+                malformedDocumentJson(DocumentState.POSTGRESQL_PROVIDER,
+                        "{\"id\":\"" + DocumentStateTestRecords.DOCUMENT_UUID
+                                + "\",\"_lastModifiedDate\":\"2026-07-30T14:15:16Z\","
+                                + "\"integerTooLarge\":9223372036854775808}",
+                        DocumentState.FailureReason.INVALID_DOCUMENT_JSON),
                 malformedDocumentJson(DocumentState.SQLSERVER_PROVIDER, "__debezium_unavailable_value",
                         DocumentState.FailureReason.UNAVAILABLE_DOCUMENT_JSON));
     }
