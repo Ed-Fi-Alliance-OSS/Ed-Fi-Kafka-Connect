@@ -34,6 +34,24 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
     private static final String OPERATION_FIELD = "op";
     private static final String AFTER_FIELD = "after";
     private static final String DOCUMENT_UUID_FIELD = "DocumentUuid";
+    private static final String PROJECT_NAME_FIELD = "ProjectName";
+    private static final String RESOURCE_NAME_FIELD = "ResourceName";
+    private static final String RESOURCE_VERSION_FIELD = "ResourceVersion";
+    private static final String CONTENT_VERSION_FIELD = "ContentVersion";
+    private static final String STREAM_ETAG_FIELD = "StreamEtag";
+    private static final String LAST_MODIFIED_AT_FIELD = "LastModifiedAt";
+    private static final String DOCUMENT_JSON_FIELD = "DocumentJson";
+    private static final String PUBLIC_CONTRACT_VERSION_FIELD = "contractVersion";
+    private static final String PUBLIC_DOCUMENT_UUID_FIELD = "documentUuid";
+    private static final String PUBLIC_PROJECT_NAME_FIELD = "projectName";
+    private static final String PUBLIC_RESOURCE_NAME_FIELD = "resourceName";
+    private static final String PUBLIC_RESOURCE_VERSION_FIELD = "resourceVersion";
+    private static final String PUBLIC_CONTENT_VERSION_FIELD = "contentVersion";
+    private static final String PUBLIC_LAST_MODIFIED_AT_FIELD = "lastModifiedAt";
+    private static final String PUBLIC_DOCUMENT_FIELD = "document";
+    private static final String PUBLIC_DOCUMENT_ID_FIELD = "id";
+    private static final String PUBLIC_DOCUMENT_ETAG_FIELD = "_etag";
+    private static final String PUBLIC_DOCUMENT_LAST_MODIFIED_DATE_FIELD = "_lastModifiedDate";
     private static final String RELATIONAL_SCHEMA = "dms";
     private static final String DOCUMENT_CACHE_TABLE = "DocumentCache";
     private static final String DOCUMENT_TABLE = "Document";
@@ -42,29 +60,22 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
     private static final String POSTGRESQL_SOURCE_SCHEMA_NAME = "io.debezium.connector.postgresql.Source";
     private static final String SQLSERVER_SOURCE_SCHEMA_NAME = "io.debezium.connector.sqlserver.Source";
     private static final String POSTGRESQL_UUID_SCHEMA_NAME = "io.debezium.data.Uuid";
+    private static final String POSTGRESQL_JSON_SCHEMA_NAME = "io.debezium.data.Json";
+    private static final String POSTGRESQL_TIMESTAMP_SCHEMA_NAME = "io.debezium.time.ZonedTimestamp";
+    private static final String SQLSERVER_TIMESTAMP_SCHEMA_NAME = "io.debezium.time.IsoTimestamp";
+    private static final String SQLSERVER_UNAVAILABLE_VALUE = "__debezium_unavailable_value";
     private static final int MAX_METADATA_VALUE_LENGTH = 128;
-
-    private static final ConfigDef.Validator PROVIDER_VALIDATOR = (name, value) -> {
-        if (!(POSTGRESQL_PROVIDER.equals(value) || SQLSERVER_PROVIDER.equals(value))) {
-            throw new ConfigException(name, value, "must be exactly 'postgresql' or 'sqlserver'");
-        }
-    };
-
-    private static final ConfigDef.Validator NON_EMPTY_STRING = (name, value) -> {
-        if (!(value instanceof String) || ((String) value).isEmpty()) {
-            throw new ConfigException(name, value, "must be a non-empty string");
-        }
-    };
+    private static final int CONTRACT_VERSION = 1;
 
     public static final ConfigDef CONFIG_DEF = new ConfigDef()
             .define(PROVIDER_CONFIG, ConfigDef.Type.STRING, ConfigDef.NO_DEFAULT_VALUE,
-                    PROVIDER_VALIDATOR, ConfigDef.Importance.HIGH,
+                    DocumentState::validateProviderConfig, ConfigDef.Importance.HIGH,
                     "Relational source provider. Must be exactly 'postgresql' or 'sqlserver'.")
             .define(TARGET_TOPIC_CONFIG, ConfigDef.Type.STRING, ConfigDef.NO_DEFAULT_VALUE,
-                    NON_EMPTY_STRING, ConfigDef.Importance.HIGH,
+                    DocumentState::validateNonEmptyStringConfig, ConfigDef.Importance.HIGH,
                     "Public document topic.")
             .define(PROGRESS_TOPIC_CONFIG, ConfigDef.Type.STRING, ConfigDef.NO_DEFAULT_VALUE,
-                    NON_EMPTY_STRING, ConfigDef.Importance.HIGH,
+                    DocumentState::validateNonEmptyStringConfig, ConfigDef.Importance.HIGH,
                     "Progress topic, derived as target.topic plus '.cdc-progress'.");
 
     private Settings settings;
@@ -96,7 +107,10 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
         }
         if (classifiedRecord.outputKind() == OutputKind.PUBLIC_UPSERT
                 || classifiedRecord.outputKind() == OutputKind.PUBLIC_TOMBSTONE) {
-            validatePublicDocumentKey(record, classifiedRecord);
+            final ValidatedDocumentKey documentKey = validatePublicDocumentKey(record, classifiedRecord);
+            if (classifiedRecord.outputKind() == OutputKind.PUBLIC_UPSERT) {
+                return publicUpsert(record, classifiedRecord, documentKey);
+            }
         }
         throw transformationFailure(
                 FailureReason.OUTPUT_NOT_IMPLEMENTED, settings.provider(), record, classifiedRecord);
@@ -133,6 +147,27 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
             }
         }
         return documentKey;
+    }
+
+    private R publicUpsert(
+            final R record,
+            final ClassifiedRecord classifiedRecord,
+            final ValidatedDocumentKey documentKey) {
+        final Map<String, Object> value =
+                settings.sourceAdapter().publicUpsertValue(record, classifiedRecord, documentKey);
+        return DocumentStateJson.publicUpsertRecord(record, settings.targetTopic(), documentKey, value);
+    }
+
+    private static void validateProviderConfig(final String name, final Object value) {
+        if (!(POSTGRESQL_PROVIDER.equals(value) || SQLSERVER_PROVIDER.equals(value))) {
+            throw new ConfigException(name, value, "must be exactly 'postgresql' or 'sqlserver'");
+        }
+    }
+
+    private static void validateNonEmptyStringConfig(final String name, final Object value) {
+        if (!(value instanceof String) || ((String) value).isEmpty()) {
+            throw new ConfigException(name, value, "must be a non-empty string");
+        }
     }
 
     private static String requiredStringConfig(final Map<String, ?> configs, final String name) {
@@ -263,6 +298,26 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
         }
     }
 
+    private static void validatePublicDocument(
+            final ValidatedDocumentKey documentKey,
+            final RetainedCacheRow row,
+            final Map<String, Object> document,
+            final ConnectRecord<?> record,
+            final ClassifiedRecord classifiedRecord) {
+        if (!documentKey.value().equals(row.documentUuid())) {
+            throw classifiedFailure(FailureReason.DOCUMENT_UUID_MISMATCH, record, classifiedRecord);
+        }
+        if (!documentKey.value().equals(document.get(PUBLIC_DOCUMENT_ID_FIELD))) {
+            throw classifiedFailure(FailureReason.PUBLIC_DOCUMENT_INVARIANT_MISMATCH, record, classifiedRecord);
+        }
+        if (!row.lastModifiedAt().equals(document.get(PUBLIC_DOCUMENT_LAST_MODIFIED_DATE_FIELD))) {
+            throw classifiedFailure(FailureReason.PUBLIC_DOCUMENT_INVARIANT_MISMATCH, record, classifiedRecord);
+        }
+        if (!row.streamEtag().equals(document.get(PUBLIC_DOCUMENT_ETAG_FIELD))) {
+            throw classifiedFailure(FailureReason.PUBLIC_DOCUMENT_INVARIANT_MISMATCH, record, classifiedRecord);
+        }
+    }
+
     private static TransformationFailureException transformationFailure(
             final FailureReason reason,
             final ConnectRecord<?> record,
@@ -309,7 +364,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
         return new TransformationFailureException(reason, metadata);
     }
 
-    private static TransformationFailureException classifiedFailure(
+    static TransformationFailureException classifiedFailure(
             final FailureReason reason,
             final ConnectRecord<?> record,
             final ClassifiedRecord classifiedRecord) {
@@ -386,6 +441,13 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
         UNSUPPORTED_RETAINED_ROW_SHAPE("unsupported retained row shape"),
         UNSUPPORTED_DOCUMENT_UUID_SHAPE("unsupported DocumentUuid shape"),
         DOCUMENT_UUID_MISMATCH("DocumentUuid mismatch"),
+        MISSING_REQUIRED_FIELD("missing required retained row field"),
+        UNSUPPORTED_REQUIRED_FIELD_SHAPE("unsupported required retained row field shape"),
+        INVALID_DOCUMENT_JSON("invalid DocumentJson"),
+        UNAVAILABLE_DOCUMENT_JSON("unavailable DocumentJson"),
+        DOCUMENT_JSON_HAS_ETAG("DocumentJson contains _etag"),
+        INVALID_LAST_MODIFIED_AT("invalid LastModifiedAt"),
+        PUBLIC_DOCUMENT_INVARIANT_MISMATCH("public document invariant mismatch"),
         OUTPUT_NOT_IMPLEMENTED("output transformation is not implemented");
 
         private final String description;
@@ -501,6 +563,11 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
         DROP
     }
 
+    enum FieldKind {
+        PLAIN_STRING,
+        DOCUMENT_JSON
+    }
+
     static final class ClassifiedRecord {
         private final SourceCategory sourceCategory;
         private final SourceMetadata sourceMetadata;
@@ -570,6 +637,68 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
 
         String value() {
             return value;
+        }
+    }
+
+    static final class RetainedCacheRow {
+        private final String documentUuid;
+        private final String projectName;
+        private final String resourceName;
+        private final String resourceVersion;
+        private final long contentVersion;
+        private final String streamEtag;
+        private final String lastModifiedAt;
+        private final String documentJson;
+
+        RetainedCacheRow(
+                final String documentUuid,
+                final String projectName,
+                final String resourceName,
+                final String resourceVersion,
+                final long contentVersion,
+                final String streamEtag,
+                final String lastModifiedAt,
+                final String documentJson) {
+            this.documentUuid = documentUuid;
+            this.projectName = projectName;
+            this.resourceName = resourceName;
+            this.resourceVersion = resourceVersion;
+            this.contentVersion = contentVersion;
+            this.streamEtag = streamEtag;
+            this.lastModifiedAt = lastModifiedAt;
+            this.documentJson = documentJson;
+        }
+
+        String documentUuid() {
+            return documentUuid;
+        }
+
+        String projectName() {
+            return projectName;
+        }
+
+        String resourceName() {
+            return resourceName;
+        }
+
+        String resourceVersion() {
+            return resourceVersion;
+        }
+
+        long contentVersion() {
+            return contentVersion;
+        }
+
+        String streamEtag() {
+            return streamEtag;
+        }
+
+        String lastModifiedAt() {
+            return lastModifiedAt;
+        }
+
+        String documentJson() {
+            return documentJson;
         }
     }
 
@@ -680,6 +809,33 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
 
         public String cacheRowDocumentUuid(
                 final ConnectRecord<?> record, final ClassifiedRecord classifiedRecord) {
+            return documentUuid(retainedAfterStruct(record, classifiedRecord), record, classifiedRecord,
+                    FailureReason.UNSUPPORTED_DOCUMENT_UUID_SHAPE);
+        }
+
+        public Map<String, Object> publicUpsertValue(
+                final ConnectRecord<?> record,
+                final ClassifiedRecord classifiedRecord,
+                final ValidatedDocumentKey documentKey) {
+            final RetainedCacheRow row = cacheRow(record, classifiedRecord);
+            final Map<String, Object> document =
+                    DocumentStateJson.parseDocumentJson(row, record, classifiedRecord);
+            validatePublicDocument(documentKey, row, document, record, classifiedRecord);
+
+            final Map<String, Object> value = new LinkedHashMap<>();
+            value.put(PUBLIC_CONTRACT_VERSION_FIELD, CONTRACT_VERSION);
+            value.put(PUBLIC_DOCUMENT_UUID_FIELD, documentKey.value());
+            value.put(PUBLIC_PROJECT_NAME_FIELD, row.projectName());
+            value.put(PUBLIC_RESOURCE_NAME_FIELD, row.resourceName());
+            value.put(PUBLIC_RESOURCE_VERSION_FIELD, row.resourceVersion());
+            value.put(PUBLIC_CONTENT_VERSION_FIELD, row.contentVersion());
+            value.put(PUBLIC_LAST_MODIFIED_AT_FIELD, row.lastModifiedAt());
+            value.put(PUBLIC_DOCUMENT_FIELD, document);
+            return value;
+        }
+
+        private Struct retainedAfterStruct(
+                final ConnectRecord<?> record, final ClassifiedRecord classifiedRecord) {
             final Schema valueSchema = requireValueSchema(record, provider);
             final var afterField = valueSchema.field(AFTER_FIELD);
             if (afterField == null) {
@@ -693,8 +849,123 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
             if (!(after instanceof Struct)) {
                 throw classifiedFailure(FailureReason.MISSING_RETAINED_ROW, record, classifiedRecord);
             }
-            return documentUuid((Struct) after, record, classifiedRecord,
-                    FailureReason.UNSUPPORTED_DOCUMENT_UUID_SHAPE);
+            return (Struct) after;
+        }
+
+        private RetainedCacheRow cacheRow(
+                final ConnectRecord<?> record, final ClassifiedRecord classifiedRecord) {
+            final Struct row = retainedAfterStruct(record, classifiedRecord);
+            return new RetainedCacheRow(
+                    documentUuid(row, record, classifiedRecord,
+                            FailureReason.UNSUPPORTED_DOCUMENT_UUID_SHAPE),
+                    requiredString(row, PROJECT_NAME_FIELD, FieldKind.PLAIN_STRING, record, classifiedRecord),
+                    requiredString(row, RESOURCE_NAME_FIELD, FieldKind.PLAIN_STRING, record, classifiedRecord),
+                    requiredString(row, RESOURCE_VERSION_FIELD, FieldKind.PLAIN_STRING, record, classifiedRecord),
+                    requiredContentVersion(row, record, classifiedRecord),
+                    requiredString(row, STREAM_ETAG_FIELD, FieldKind.PLAIN_STRING, record, classifiedRecord),
+                    requiredLastModifiedAt(row, record, classifiedRecord),
+                    requiredString(row, DOCUMENT_JSON_FIELD, FieldKind.DOCUMENT_JSON, record, classifiedRecord));
+        }
+
+        private String requiredString(
+                final Struct row,
+                final String fieldName,
+                final FieldKind fieldKind,
+                final ConnectRecord<?> record,
+                final ClassifiedRecord classifiedRecord) {
+            final var field = row.schema().field(fieldName);
+            if (field == null) {
+                throw classifiedFailure(FailureReason.MISSING_REQUIRED_FIELD, record, classifiedRecord);
+            }
+            if (!isPinnedStringSchema(field.schema(), fieldKind)) {
+                throw classifiedFailure(FailureReason.UNSUPPORTED_REQUIRED_FIELD_SHAPE, record, classifiedRecord);
+            }
+
+            final Object value = row.getWithoutDefault(fieldName);
+            if (value == null) {
+                throw classifiedFailure(FailureReason.MISSING_REQUIRED_FIELD, record, classifiedRecord);
+            }
+            if (!(value instanceof String)) {
+                throw classifiedFailure(FailureReason.UNSUPPORTED_REQUIRED_FIELD_SHAPE, record, classifiedRecord);
+            }
+            final String stringValue = (String) value;
+            if (stringValue.isEmpty()) {
+                throw classifiedFailure(FailureReason.MISSING_REQUIRED_FIELD, record, classifiedRecord);
+            }
+            if (fieldKind == FieldKind.DOCUMENT_JSON
+                    && provider == Provider.SQLSERVER
+                    && SQLSERVER_UNAVAILABLE_VALUE.equals(stringValue)) {
+                throw classifiedFailure(FailureReason.UNAVAILABLE_DOCUMENT_JSON, record, classifiedRecord);
+            }
+            return stringValue;
+        }
+
+        private long requiredContentVersion(
+                final Struct row,
+                final ConnectRecord<?> record,
+                final ClassifiedRecord classifiedRecord) {
+            final var field = row.schema().field(CONTENT_VERSION_FIELD);
+            if (field == null) {
+                throw classifiedFailure(FailureReason.MISSING_REQUIRED_FIELD, record, classifiedRecord);
+            }
+            final Schema schema = field.schema();
+            if (schema.type() != Schema.Type.INT64 || schema.isOptional() || schema.name() != null) {
+                throw classifiedFailure(FailureReason.UNSUPPORTED_REQUIRED_FIELD_SHAPE, record, classifiedRecord);
+            }
+
+            final Object value = row.getWithoutDefault(CONTENT_VERSION_FIELD);
+            if (value == null) {
+                throw classifiedFailure(FailureReason.MISSING_REQUIRED_FIELD, record, classifiedRecord);
+            }
+            if (!(value instanceof Long)) {
+                throw classifiedFailure(FailureReason.UNSUPPORTED_REQUIRED_FIELD_SHAPE, record, classifiedRecord);
+            }
+            return (Long) value;
+        }
+
+        private String requiredLastModifiedAt(
+                final Struct row,
+                final ConnectRecord<?> record,
+                final ClassifiedRecord classifiedRecord) {
+            final var field = row.schema().field(LAST_MODIFIED_AT_FIELD);
+            if (field == null) {
+                throw classifiedFailure(FailureReason.MISSING_REQUIRED_FIELD, record, classifiedRecord);
+            }
+            if (!isPinnedLastModifiedAtSchema(field.schema())) {
+                throw classifiedFailure(FailureReason.UNSUPPORTED_REQUIRED_FIELD_SHAPE, record, classifiedRecord);
+            }
+
+            final Object value = row.getWithoutDefault(LAST_MODIFIED_AT_FIELD);
+            if (value == null) {
+                throw classifiedFailure(FailureReason.MISSING_REQUIRED_FIELD, record, classifiedRecord);
+            }
+            if (!(value instanceof String) || ((String) value).isEmpty()) {
+                throw classifiedFailure(FailureReason.INVALID_LAST_MODIFIED_AT, record, classifiedRecord);
+            }
+            return DocumentStateJson.normalizeLastModifiedAt((String) value, record, classifiedRecord);
+        }
+
+        private boolean isPinnedStringSchema(final Schema schema, final FieldKind fieldKind) {
+            if (schema.type() != Schema.Type.STRING || schema.isOptional()) {
+                return false;
+            }
+            if (fieldKind == FieldKind.DOCUMENT_JSON && provider == Provider.POSTGRESQL) {
+                return POSTGRESQL_JSON_SCHEMA_NAME.equals(schema.name());
+            }
+            return schema.name() == null;
+        }
+
+        private boolean isPinnedLastModifiedAtSchema(final Schema schema) {
+            if (schema.type() != Schema.Type.STRING || schema.isOptional()) {
+                return false;
+            }
+            if (provider == Provider.POSTGRESQL) {
+                return POSTGRESQL_TIMESTAMP_SCHEMA_NAME.equals(schema.name());
+            }
+            if (provider == Provider.SQLSERVER) {
+                return SQLSERVER_TIMESTAMP_SCHEMA_NAME.equals(schema.name());
+            }
+            return false;
         }
 
         private String documentUuid(

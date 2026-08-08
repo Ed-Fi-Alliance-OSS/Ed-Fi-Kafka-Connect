@@ -109,6 +109,10 @@ test {
     useJUnitPlatform {
         includeEngines 'junit-jupiter'
     }
+    if (project.hasProperty('edfiDmsMaterializedDocumentFixtureRoot')) {
+        systemProperty 'edfiDmsMaterializedDocumentFixtureRoot',
+                project.property('edfiDmsMaterializedDocumentFixtureRoot')
+    }
 }
 
 jar {
