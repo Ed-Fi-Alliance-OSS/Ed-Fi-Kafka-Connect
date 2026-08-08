@@ -5,15 +5,12 @@
 
 package org.edfi.kafka.connect.transforms;
 
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-import org.apache.kafka.common.config.AbstractConfig;
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.common.config.ConfigException;
 import org.apache.kafka.connect.connector.ConnectRecord;
-import org.apache.kafka.connect.data.Field;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.errors.DataException;
@@ -35,6 +32,8 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
     private static final String SOURCE_SCHEMA_FIELD = "schema";
     private static final String SOURCE_TABLE_FIELD = "table";
     private static final String OPERATION_FIELD = "op";
+    private static final String AFTER_FIELD = "after";
+    private static final String DOCUMENT_UUID_FIELD = "DocumentUuid";
     private static final String RELATIONAL_SCHEMA = "dms";
     private static final String DOCUMENT_CACHE_TABLE = "DocumentCache";
     private static final String DOCUMENT_TABLE = "Document";
@@ -42,6 +41,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
     private static final String PROJECTION_WORK_TABLE = "DocumentProjectionWork";
     private static final String POSTGRESQL_SOURCE_SCHEMA_NAME = "io.debezium.connector.postgresql.Source";
     private static final String SQLSERVER_SOURCE_SCHEMA_NAME = "io.debezium.connector.sqlserver.Source";
+    private static final String POSTGRESQL_UUID_SCHEMA_NAME = "io.debezium.data.Uuid";
     private static final int MAX_METADATA_VALUE_LENGTH = 128;
 
     private static final ConfigDef.Validator PROVIDER_VALIDATOR = (name, value) -> {
@@ -76,18 +76,16 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
 
     @Override
     public void configure(final Map<String, ?> configs) {
-        validateRawProvider(configs);
-
-        final AbstractConfig parsed = new AbstractConfig(CONFIG_DEF, configs);
-        final String targetTopic = parsed.getString(TARGET_TOPIC_CONFIG);
-        final String progressTopic = parsed.getString(PROGRESS_TOPIC_CONFIG);
+        final Provider provider = providerFrom(configs.get(PROVIDER_CONFIG));
+        final String targetTopic = requiredStringConfig(configs, TARGET_TOPIC_CONFIG);
+        final String progressTopic = requiredStringConfig(configs, PROGRESS_TOPIC_CONFIG);
 
         if (!progressTopic.equals(targetTopic + PROGRESS_TOPIC_SUFFIX)) {
             throw new ConfigException(PROGRESS_TOPIC_CONFIG, progressTopic,
                     "must equal target.topic plus '" + PROGRESS_TOPIC_SUFFIX + "'");
         }
 
-        this.settings = new Settings(providerFrom(parsed.getString(PROVIDER_CONFIG)), targetTopic, progressTopic);
+        this.settings = new Settings(provider, targetTopic, progressTopic);
     }
 
     @Override
@@ -95,6 +93,10 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
         final ClassifiedRecord classifiedRecord = classify(record);
         if (classifiedRecord.outputKind() == OutputKind.DROP) {
             return null;
+        }
+        if (classifiedRecord.outputKind() == OutputKind.PUBLIC_UPSERT
+                || classifiedRecord.outputKind() == OutputKind.PUBLIC_TOMBSTONE) {
+            validatePublicDocumentKey(record, classifiedRecord);
         }
         throw transformationFailure(
                 FailureReason.OUTPUT_NOT_IMPLEMENTED, settings.provider(), record, classifiedRecord);
@@ -122,14 +124,26 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
                 sourceMetadata, sourceOperation, outputKind(sourceMetadata, sourceOperation));
     }
 
-    private static void validateRawProvider(final Map<String, ?> configs) {
-        final Object provider = configs.get(PROVIDER_CONFIG);
-        if (!(POSTGRESQL_PROVIDER.equals(provider) || SQLSERVER_PROVIDER.equals(provider))) {
-            throw new ConfigException(PROVIDER_CONFIG, provider, "must be exactly 'postgresql' or 'sqlserver'");
+    ValidatedDocumentKey validatePublicDocumentKey(final R record, final ClassifiedRecord classifiedRecord) {
+        final ValidatedDocumentKey documentKey = settings.sourceAdapter().documentKey(record, classifiedRecord);
+        if (classifiedRecord.outputKind() == OutputKind.PUBLIC_UPSERT) {
+            final String rowDocumentUuid = settings.sourceAdapter().cacheRowDocumentUuid(record, classifiedRecord);
+            if (!documentKey.value().equals(rowDocumentUuid)) {
+                throw classifiedFailure(FailureReason.DOCUMENT_UUID_MISMATCH, record, classifiedRecord);
+            }
         }
+        return documentKey;
     }
 
-    private static Provider providerFrom(final String provider) {
+    private static String requiredStringConfig(final Map<String, ?> configs, final String name) {
+        final Object value = configs.get(name);
+        if (!(value instanceof String) || ((String) value).isEmpty()) {
+            throw new ConfigException(name, value, "must be a non-empty string");
+        }
+        return (String) value;
+    }
+
+    private static Provider providerFrom(final Object provider) {
         if (POSTGRESQL_PROVIDER.equals(provider)) {
             return Provider.POSTGRESQL;
         }
@@ -149,7 +163,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
     private static SourceOperation sourceOperation(
             final ConnectRecord<?> record, final SourceMetadata sourceMetadata) {
         final Schema valueSchema = requireValueSchema(record);
-        final Field operationField = valueSchema.field(OPERATION_FIELD);
+        final var operationField = valueSchema.field(OPERATION_FIELD);
         if (operationField == null) {
             throw transformationFailure(FailureReason.MISSING_OPERATION_METADATA, record, sourceMetadata, null);
         }
@@ -282,6 +296,9 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
         final Map<String, String> metadata = failureMetadata(provider, record);
         if (classifiedRecord != null) {
             appendMetadata(metadata, "sourceCategory", classifiedRecord.sourceCategory());
+            if (classifiedRecord.sourceMetadata() != null) {
+                appendMetadata(metadata, "sourceSchema", classifiedRecord.sourceMetadata().sourceSchema());
+            }
             if (classifiedRecord.sourceTable() != null) {
                 appendMetadata(metadata, "sourceTable", classifiedRecord.sourceTable().tableName());
             }
@@ -290,6 +307,19 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
             }
         }
         return new TransformationFailureException(reason, metadata);
+    }
+
+    private static TransformationFailureException classifiedFailure(
+            final FailureReason reason,
+            final ConnectRecord<?> record,
+            final ClassifiedRecord classifiedRecord) {
+        final Object operation = classifiedRecord == null || classifiedRecord.sourceOperation() == null
+                ? null : classifiedRecord.sourceOperation().code();
+        final SourceMetadata sourceMetadata = classifiedRecord == null ? null : classifiedRecord.sourceMetadata();
+        if (sourceMetadata != null) {
+            return transformationFailure(reason, record, sourceMetadata, operation);
+        }
+        return transformationFailure(reason, null, record, null, operation);
     }
 
     private static Map<String, String> failureMetadata(final Provider provider, final ConnectRecord<?> record) {
@@ -348,6 +378,14 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
         UNSUPPORTED_SOURCE_TABLE("unsupported source table"),
         UNEXPECTED_RETAINED_SOURCE_TABLE("unexpected retained source table"),
         UNSUPPORTED_SOURCE_OPERATION("unsupported source operation"),
+        MISSING_DOCUMENT_KEY("missing public document key"),
+        UNSUPPORTED_DOCUMENT_KEY_SHAPE("unsupported public document key shape"),
+        MISSING_DOCUMENT_UUID("missing DocumentUuid"),
+        INVALID_DOCUMENT_UUID("invalid DocumentUuid"),
+        MISSING_RETAINED_ROW("missing retained row"),
+        UNSUPPORTED_RETAINED_ROW_SHAPE("unsupported retained row shape"),
+        UNSUPPORTED_DOCUMENT_UUID_SHAPE("unsupported DocumentUuid shape"),
+        DOCUMENT_UUID_MISMATCH("DocumentUuid mismatch"),
         OUTPUT_NOT_IMPLEMENTED("output transformation is not implemented");
 
         private final String description;
@@ -368,7 +406,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
         private TransformationFailureException(final FailureReason reason, final Map<String, String> metadata) {
             super(message(reason, metadata));
             this.reason = reason;
-            this.metadata = Collections.unmodifiableMap(new LinkedHashMap<>(metadata));
+            this.metadata = new LinkedHashMap<>(metadata);
         }
 
         public FailureReason reason() {
@@ -376,7 +414,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
         }
 
         public Map<String, String> metadata() {
-            return metadata;
+            return new LinkedHashMap<>(metadata);
         }
 
         private static String message(final FailureReason reason, final Map<String, String> metadata) {
@@ -465,23 +503,26 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
 
     static final class ClassifiedRecord {
         private final SourceCategory sourceCategory;
+        private final SourceMetadata sourceMetadata;
         private final SourceTable sourceTable;
         private final SourceOperation sourceOperation;
         private final OutputKind outputKind;
 
         private ClassifiedRecord(
                 final SourceCategory sourceCategory,
+                final SourceMetadata sourceMetadata,
                 final SourceTable sourceTable,
                 final SourceOperation sourceOperation,
                 final OutputKind outputKind) {
             this.sourceCategory = sourceCategory;
+            this.sourceMetadata = sourceMetadata;
             this.sourceTable = sourceTable;
             this.sourceOperation = sourceOperation;
             this.outputKind = outputKind;
         }
 
         static ClassifiedRecord nativeHeartbeat() {
-            return new ClassifiedRecord(SourceCategory.NATIVE_HEARTBEAT, null, null, OutputKind.PROGRESS);
+            return new ClassifiedRecord(SourceCategory.NATIVE_HEARTBEAT, null, null, null, OutputKind.PROGRESS);
         }
 
         static ClassifiedRecord relational(
@@ -489,11 +530,16 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
                 final SourceOperation sourceOperation,
                 final OutputKind outputKind) {
             return new ClassifiedRecord(
-                    sourceMetadata.sourceCategory(), sourceMetadata.sourceTable(), sourceOperation, outputKind);
+                    sourceMetadata.sourceCategory(), sourceMetadata, sourceMetadata.sourceTable(), sourceOperation,
+                    outputKind);
         }
 
         SourceCategory sourceCategory() {
             return sourceCategory;
+        }
+
+        SourceMetadata sourceMetadata() {
+            return sourceMetadata;
         }
 
         SourceTable sourceTable() {
@@ -506,6 +552,24 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
 
         OutputKind outputKind() {
             return outputKind;
+        }
+    }
+
+    static final class ValidatedDocumentKey {
+        private final Schema schema;
+        private final String value;
+
+        ValidatedDocumentKey(final String value) {
+            this.schema = Schema.STRING_SCHEMA;
+            this.value = value;
+        }
+
+        Schema schema() {
+            return schema;
+        }
+
+        String value() {
+            return value;
         }
     }
 
@@ -550,11 +614,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
         }
     }
 
-    interface SourceAdapter {
-        SourceMetadata sourceMetadata(ConnectRecord<?> record);
-    }
-
-    static final class DebeziumSourceAdapter implements SourceAdapter {
+    static final class DebeziumSourceAdapter {
         private final Provider provider;
         private final String sourceSchemaName;
 
@@ -563,11 +623,10 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
             this.sourceSchemaName = sourceSchemaName;
         }
 
-        @Override
         public SourceMetadata sourceMetadata(final ConnectRecord<?> record) {
             final Struct value = requireStructValue(record, provider);
             final Schema valueSchema = requireValueSchema(record, provider);
-            final Field sourceField = valueSchema.field(SOURCE_FIELD);
+            final var sourceField = valueSchema.field(SOURCE_FIELD);
             if (sourceField == null) {
                 throw transformationFailure(FailureReason.MISSING_SOURCE_METADATA, provider, record, null, null);
             }
@@ -601,12 +660,130 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
                     SourceCategory.RELATIONAL, sourceTable, sourceSchema, sourceTable.tableName(), provider);
         }
 
+        public ValidatedDocumentKey documentKey(
+                final ConnectRecord<?> record, final ClassifiedRecord classifiedRecord) {
+            final Object key = record.key();
+            if (key == null) {
+                throw classifiedFailure(FailureReason.MISSING_DOCUMENT_KEY, record, classifiedRecord);
+            }
+
+            final Schema keySchema = record.keySchema();
+            if (keySchema == null || keySchema.type() != Schema.Type.STRUCT || keySchema.isOptional()
+                    || !(key instanceof Struct)) {
+                throw classifiedFailure(FailureReason.UNSUPPORTED_DOCUMENT_KEY_SHAPE, record, classifiedRecord);
+            }
+
+            final String documentUuid = documentUuid((Struct) key, record, classifiedRecord,
+                    FailureReason.UNSUPPORTED_DOCUMENT_KEY_SHAPE);
+            return new ValidatedDocumentKey(documentUuid);
+        }
+
+        public String cacheRowDocumentUuid(
+                final ConnectRecord<?> record, final ClassifiedRecord classifiedRecord) {
+            final Schema valueSchema = requireValueSchema(record, provider);
+            final var afterField = valueSchema.field(AFTER_FIELD);
+            if (afterField == null) {
+                throw classifiedFailure(FailureReason.MISSING_RETAINED_ROW, record, classifiedRecord);
+            }
+            if (afterField.schema().type() != Schema.Type.STRUCT) {
+                throw classifiedFailure(FailureReason.UNSUPPORTED_RETAINED_ROW_SHAPE, record, classifiedRecord);
+            }
+
+            final Object after = requireStructValue(record, provider).getWithoutDefault(AFTER_FIELD);
+            if (!(after instanceof Struct)) {
+                throw classifiedFailure(FailureReason.MISSING_RETAINED_ROW, record, classifiedRecord);
+            }
+            return documentUuid((Struct) after, record, classifiedRecord,
+                    FailureReason.UNSUPPORTED_DOCUMENT_UUID_SHAPE);
+        }
+
+        private String documentUuid(
+                final Struct struct,
+                final ConnectRecord<?> record,
+                final ClassifiedRecord classifiedRecord,
+                final FailureReason unsupportedShapeReason) {
+            final var documentUuidField = struct.schema().field(DOCUMENT_UUID_FIELD);
+            if (documentUuidField == null) {
+                throw classifiedFailure(FailureReason.MISSING_DOCUMENT_UUID, record, classifiedRecord);
+            }
+            if (!isPinnedDocumentUuidSchema(documentUuidField.schema())) {
+                throw classifiedFailure(unsupportedShapeReason, record, classifiedRecord);
+            }
+
+            final Object value = struct.getWithoutDefault(DOCUMENT_UUID_FIELD);
+            if (value == null) {
+                throw classifiedFailure(FailureReason.MISSING_DOCUMENT_UUID, record, classifiedRecord);
+            }
+            if (!(value instanceof String)) {
+                throw classifiedFailure(unsupportedShapeReason, record, classifiedRecord);
+            }
+            return normalizeDocumentUuid((String) value, record, classifiedRecord);
+        }
+
+        private boolean isPinnedDocumentUuidSchema(final Schema schema) {
+            if (schema.type() != Schema.Type.STRING || schema.isOptional()) {
+                return false;
+            }
+            if (provider == Provider.POSTGRESQL) {
+                return POSTGRESQL_UUID_SCHEMA_NAME.equals(schema.name());
+            }
+            if (provider == Provider.SQLSERVER) {
+                return schema.name() == null;
+            }
+            return false;
+        }
+
+        private String normalizeDocumentUuid(
+                final String value,
+                final ConnectRecord<?> record,
+                final ClassifiedRecord classifiedRecord) {
+            if (!isUuidDFormat(value)) {
+                throw classifiedFailure(FailureReason.INVALID_DOCUMENT_UUID, record, classifiedRecord);
+            }
+            final StringBuilder normalized = new StringBuilder(value.length());
+            for (int i = 0; i < value.length(); i++) {
+                normalized.append(Character.toLowerCase(value.charAt(i)));
+            }
+            return normalized.toString();
+        }
+
+        private boolean isUuidDFormat(final String value) {
+            if (value.length() != 36) {
+                return false;
+            }
+            for (int i = 0; i < value.length(); i++) {
+                final char character = value.charAt(i);
+                if (isUuidHyphenIndex(i)) {
+                    if (character != '-') {
+                        return false;
+                    }
+                } else if (!isHexDigit(character)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        private boolean isUuidHyphenIndex(final int index) {
+            return index == 8 || index == 13 || index == 18 || index == 23;
+        }
+
+        private boolean isHexDigit(final char character) {
+            if ('0' <= character && character <= '9') {
+                return true;
+            }
+            if ('a' <= character && character <= 'f') {
+                return true;
+            }
+            return 'A' <= character && character <= 'F';
+        }
+
         private String sourceString(
                 final Struct sourceStruct,
                 final String fieldName,
                 final ConnectRecord<?> record,
                 final SourceMetadata sourceMetadata) {
-            final Field field = sourceStruct.schema().field(fieldName);
+            final var field = sourceStruct.schema().field(fieldName);
             if (field == null || field.schema().type() != Schema.Type.STRING || field.schema().isOptional()) {
                 throw transformationFailure(
                         FailureReason.UNSUPPORTED_SOURCE_METADATA_SHAPE, provider, record, sourceMetadata, null);
@@ -624,7 +801,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
         private final Provider provider;
         private final String targetTopic;
         private final String progressTopic;
-        private final SourceAdapter sourceAdapter;
+        private final DebeziumSourceAdapter sourceAdapter;
 
         Settings(final Provider provider, final String targetTopic, final String progressTopic) {
             this.provider = provider;
@@ -645,11 +822,11 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
             return progressTopic;
         }
 
-        SourceAdapter sourceAdapter() {
+        DebeziumSourceAdapter sourceAdapter() {
             return sourceAdapter;
         }
 
-        private static SourceAdapter sourceAdapter(final Provider provider) {
+        private static DebeziumSourceAdapter sourceAdapter(final Provider provider) {
             if (provider == Provider.POSTGRESQL) {
                 return new DebeziumSourceAdapter(provider, POSTGRESQL_SOURCE_SCHEMA_NAME);
             }
