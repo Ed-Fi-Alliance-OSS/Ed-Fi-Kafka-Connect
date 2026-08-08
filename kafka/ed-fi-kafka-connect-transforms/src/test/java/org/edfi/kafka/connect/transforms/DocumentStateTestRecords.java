@@ -7,6 +7,7 @@ package org.edfi.kafka.connect.transforms;
 
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 
 import org.apache.kafka.connect.data.Schema;
@@ -60,8 +61,65 @@ final class DocumentStateTestRecords {
                 provider, documentUuid, after, 987L, new ConnectHeaders().addString("debezium", "internal"));
     }
 
+    static SourceRecord documentCacheDropRecord(final String provider, final String operation) {
+        return relationalRecord(provider, "DocumentCache", operation, null, null, null, null,
+                new ConnectHeaders());
+    }
+
+    static SourceRecord documentDeleteRecord(final String provider, final Struct before) {
+        final Schema beforeSchema = before == null ? null : before.schema();
+        return documentDeleteRecord(provider, DOCUMENT_UUID, beforeSchema, before, null, new ConnectHeaders());
+    }
+
+    static SourceRecord documentDeleteRecordWithPublicMetadata(final String provider, final Struct before) {
+        final Schema beforeSchema = before == null ? null : before.schema();
+        return documentDeleteRecord(
+                provider, DOCUMENT_UUID.toUpperCase(Locale.ROOT), beforeSchema, before, 987L,
+                new ConnectHeaders().addString("debezium", "internal"));
+    }
+
+    static SourceRecord documentDeleteRecordWithBeforeSchema(
+            final String provider,
+            final Schema beforeSchema,
+            final Struct before) {
+        return documentDeleteRecord(provider, DOCUMENT_UUID, beforeSchema, before, null, new ConnectHeaders());
+    }
+
+    static SourceRecord automaticDebeziumDeleteTombstone(final String provider) {
+        final Schema keySchema = keyStructSchema(provider);
+        final Struct key = new Struct(keySchema).put(DOCUMENT_UUID_FIELD, DOCUMENT_UUID);
+        return new SourceRecord(
+                sourcePartition(), sourceOffset(), "server.dms.Document", null,
+                keySchema, key, null, null);
+    }
+
     static CacheRowBuilder cacheRowBuilder(final String provider) {
         return new CacheRowBuilder(provider);
+    }
+
+    static Struct documentBeforeRow(final String provider, final Object documentUuid) {
+        return documentBeforeRow(documentBeforeRowSchema(provider, pinnedUuidSchema(provider)), documentUuid);
+    }
+
+    static Struct documentBeforeRow(final Schema schema, final Object documentUuid) {
+        final Struct before = new Struct(schema);
+        if (schema.field(DOCUMENT_UUID_FIELD) != null && documentUuid != null) {
+            before.put(DOCUMENT_UUID_FIELD, documentUuid);
+        }
+        return before;
+    }
+
+    static Schema documentBeforeRowSchema(final String provider, final Schema documentUuidSchema) {
+        return SchemaBuilder.struct()
+                .name("server.dms." + sourceSchemaName(provider) + ".Document.Value")
+                .field(DOCUMENT_UUID_FIELD, documentUuidSchema)
+                .build();
+    }
+
+    static Schema documentBeforeRowSchemaWithoutDocumentUuid(final String provider) {
+        return SchemaBuilder.struct()
+                .name("server.dms." + sourceSchemaName(provider) + ".Document.Value")
+                .build();
     }
 
     static Schema pinnedUuidSchema(final String provider) {
@@ -91,21 +149,67 @@ final class DocumentStateTestRecords {
             final Struct after,
             final Long timestamp,
             final Headers headers) {
+        return relationalRecord(provider, "DocumentCache", "c", documentUuid, after.schema(), after,
+                timestamp, headers);
+    }
+
+    private static SourceRecord documentDeleteRecord(
+            final String provider,
+            final String documentUuid,
+            final Schema beforeSchema,
+            final Struct before,
+            final Long timestamp,
+            final Headers headers) {
+        return relationalRecord(provider, "Document", "d", documentUuid, beforeSchema, before, timestamp, headers);
+    }
+
+    private static SourceRecord relationalRecord(
+            final String provider,
+            final String sourceTable,
+            final String operation,
+            final String documentUuid,
+            final Schema rowSchema,
+            final Struct row,
+            final Long timestamp,
+            final Headers headers) {
         final Schema sourceStructSchema = sourceSchema(sourceSchemaName(provider));
         final Schema valueSchema = SchemaBuilder.struct()
                 .field("source", sourceStructSchema)
                 .field("op", Schema.STRING_SCHEMA)
-                .field("after", after.schema())
                 .build();
+        final Schema valueSchemaWithRow = rowSchema == null
+                ? valueSchema
+                : SchemaBuilder.struct()
+                        .field("source", sourceStructSchema)
+                        .field("op", Schema.STRING_SCHEMA)
+                        .field(rowFieldName(sourceTable, operation), rowSchema)
+                        .build();
         final Struct value = new Struct(valueSchema)
-                .put("source", source(sourceStructSchema, "dms", "DocumentCache"))
-                .put("op", "c")
-                .put("after", after);
+                .put("source", source(sourceStructSchema, "dms", sourceTable))
+                .put("op", operation);
+        final Struct valueWithRow = rowSchema == null
+                ? value
+                : new Struct(valueSchemaWithRow)
+                        .put("source", source(sourceStructSchema, "dms", sourceTable))
+                        .put("op", operation);
+        if (rowSchema != null && row != null) {
+            valueWithRow.put(rowFieldName(sourceTable, operation), row);
+        }
         final Schema keySchema = keyStructSchema(provider);
-        final Struct key = new Struct(keySchema).put(DOCUMENT_UUID_FIELD, documentUuid);
+        final Struct key = documentUuid == null
+                ? null
+                : new Struct(keySchema).put(DOCUMENT_UUID_FIELD, documentUuid);
         return new SourceRecord(
-                sourcePartition(), sourceOffset(), "server.dms.DocumentCache", null,
-                keySchema, key, valueSchema, value, timestamp, headers);
+                sourcePartition(), sourceOffset(), "server.dms." + sourceTable, null,
+                key == null ? null : keySchema, key,
+                rowSchema == null ? valueSchema : valueSchemaWithRow, valueWithRow, timestamp, headers);
+    }
+
+    private static String rowFieldName(final String sourceTable, final String operation) {
+        if ("Document".equals(sourceTable) && "d".equals(operation)) {
+            return "before";
+        }
+        return "after";
     }
 
     private static Schema keyStructSchema(final String provider) {

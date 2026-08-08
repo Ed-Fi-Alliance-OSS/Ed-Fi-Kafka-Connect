@@ -32,6 +32,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
     private static final String SOURCE_SCHEMA_FIELD = "schema";
     private static final String SOURCE_TABLE_FIELD = "table";
     private static final String OPERATION_FIELD = "op";
+    private static final String BEFORE_FIELD = "before";
     private static final String AFTER_FIELD = "after";
     private static final String DOCUMENT_UUID_FIELD = "DocumentUuid";
     private static final String PROJECT_NAME_FIELD = "ProjectName";
@@ -111,6 +112,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
             if (classifiedRecord.outputKind() == OutputKind.PUBLIC_UPSERT) {
                 return publicUpsert(record, classifiedRecord, documentKey);
             }
+            return publicTombstone(record, classifiedRecord, documentKey);
         }
         throw transformationFailure(
                 FailureReason.OUTPUT_NOT_IMPLEMENTED, settings.provider(), record, classifiedRecord);
@@ -156,6 +158,14 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
         final Map<String, Object> value =
                 settings.sourceAdapter().publicUpsertValue(record, classifiedRecord, documentKey);
         return DocumentStateJson.publicUpsertRecord(record, settings.targetTopic(), documentKey, value);
+    }
+
+    private R publicTombstone(
+            final R record,
+            final ClassifiedRecord classifiedRecord,
+            final ValidatedDocumentKey documentKey) {
+        settings.sourceAdapter().validateDeleteBeforeDocumentUuid(record, classifiedRecord, documentKey);
+        return DocumentStateJson.publicTombstoneRecord(record, settings.targetTopic(), documentKey);
     }
 
     private static void validateProviderConfig(final String name, final Object value) {
@@ -832,6 +842,44 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
             value.put(PUBLIC_LAST_MODIFIED_AT_FIELD, row.lastModifiedAt());
             value.put(PUBLIC_DOCUMENT_FIELD, document);
             return value;
+        }
+
+        public void validateDeleteBeforeDocumentUuid(
+                final ConnectRecord<?> record,
+                final ClassifiedRecord classifiedRecord,
+                final ValidatedDocumentKey documentKey) {
+            final Schema valueSchema = requireValueSchema(record, provider);
+            final var beforeField = valueSchema.field(BEFORE_FIELD);
+            if (beforeField == null) {
+                return;
+            }
+            if (beforeField.schema().type() != Schema.Type.STRUCT) {
+                throw classifiedFailure(FailureReason.UNSUPPORTED_RETAINED_ROW_SHAPE, record, classifiedRecord);
+            }
+
+            final Object before = requireStructValue(record, provider).getWithoutDefault(BEFORE_FIELD);
+            if (before == null) {
+                return;
+            }
+            if (!(before instanceof Struct)) {
+                throw classifiedFailure(FailureReason.UNSUPPORTED_RETAINED_ROW_SHAPE, record, classifiedRecord);
+            }
+
+            final Struct beforeStruct = (Struct) before;
+            final var documentUuidField = beforeStruct.schema().field(DOCUMENT_UUID_FIELD);
+            if (documentUuidField == null) {
+                return;
+            }
+            final Object beforeDocumentUuid = beforeStruct.getWithoutDefault(DOCUMENT_UUID_FIELD);
+            if (beforeDocumentUuid == null || SQLSERVER_UNAVAILABLE_VALUE.equals(beforeDocumentUuid)) {
+                return;
+            }
+
+            final String normalizedBeforeDocumentUuid = documentUuid(
+                    beforeStruct, record, classifiedRecord, FailureReason.UNSUPPORTED_DOCUMENT_UUID_SHAPE);
+            if (!documentKey.value().equals(normalizedBeforeDocumentUuid)) {
+                throw classifiedFailure(FailureReason.DOCUMENT_UUID_MISMATCH, record, classifiedRecord);
+            }
         }
 
         private Struct retainedAfterStruct(

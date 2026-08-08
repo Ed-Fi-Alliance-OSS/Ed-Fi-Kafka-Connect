@@ -46,6 +46,15 @@ final class DocumentStateJson {
                 new ConnectHeaders());
     }
 
+    static <R extends ConnectRecord<R>> R publicTombstoneRecord(
+            final R record,
+            final String targetTopic,
+            final DocumentState.ValidatedDocumentKey documentKey) {
+        return record.newRecord(
+                targetTopic, null, documentKey.schema(), documentKey.value(), null, null, null,
+                new ConnectHeaders());
+    }
+
     static Map<String, Object> parseDocumentJson(
             final DocumentState.RetainedCacheRow row,
             final ConnectRecord<?> record,
