@@ -28,6 +28,7 @@ class ServiceLoaderManifestTest {
 
         assertThat(providers).containsExactly(
                 "org.edfi.kafka.connect.transforms.DebeziumDeletedToTombstone",
+                "org.edfi.kafka.connect.transforms.DocumentState",
                 "org.edfi.kafka.connect.transforms.ExpandJson$Value");
     }
 }
