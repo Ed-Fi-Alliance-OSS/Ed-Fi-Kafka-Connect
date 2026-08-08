@@ -308,8 +308,8 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
             case UPDATE:
             case READ:
             case DELETE:
-                return OutputKind.PROGRESS;
             case TRUNCATE:
+                return OutputKind.PROGRESS;
             default:
                 throw transformationFailure(
                         FailureReason.UNSUPPORTED_SOURCE_OPERATION, null, sourceMetadata, sourceOperation.code());

@@ -77,8 +77,9 @@ class DocumentStateClassificationTest {
     @ParameterizedTest
     @MethodSource("recognizedDropRecords")
     void Given_Recognized_Dropped_Operation_Should_Return_Null_Without_Public_Document_Validation(
+            final String provider,
             final SourceRecord record) {
-        final DocumentState<SourceRecord> transform = configuredTransform(DocumentState.POSTGRESQL_PROVIDER);
+        final DocumentState<SourceRecord> transform = configuredTransform(provider);
 
         assertThat(transform.apply(record)).isNull();
     }
@@ -140,12 +141,15 @@ class DocumentStateClassificationTest {
                 .hasMessageContaining("sourceTable=OtherTable");
     }
 
-    @Test
-    void Given_DocumentProjectionWork_Source_Table_Should_Fail_Closed() {
-        final DocumentState<SourceRecord> transform = configuredTransform(DocumentState.POSTGRESQL_PROVIDER);
+    @ParameterizedTest
+    @MethodSource("providerSourceSchemas")
+    void Given_DocumentProjectionWork_Source_Table_Should_Fail_Closed(
+            final String provider,
+            final String sourceSchemaName) {
+        final DocumentState<SourceRecord> transform = configuredTransform(provider);
 
         assertThatThrownBy(() -> transform.classify(record(
-                        POSTGRESQL_SOURCE_SCHEMA, "dms", "DocumentProjectionWork", "c")))
+                        sourceSchemaName, "dms", "DocumentProjectionWork", "c")))
                 .isInstanceOf(DataException.class)
                 .hasMessageContaining("unexpected retained source table")
                 .hasMessageContaining("DocumentProjectionWork");
@@ -161,85 +165,75 @@ class DocumentStateClassificationTest {
                 .hasMessageContaining("unsupported source metadata shape");
     }
 
-    @Test
-    void Given_CdcHeartbeat_Truncate_Should_Fail_As_Unsupported_Source_Operation() {
-        final DocumentState<SourceRecord> transform = configuredTransform(DocumentState.POSTGRESQL_PROVIDER);
-
-        assertThatThrownBy(() -> transform.classify(record(
-                        POSTGRESQL_SOURCE_SCHEMA, "dms", "CdcHeartbeat", "t")))
-                .isInstanceOf(DataException.class)
-                .hasMessageContaining("unsupported source operation");
+    private static Stream<Object[]> sourceOperationClassifications() {
+        return Stream.concat(
+                sourceOperationClassificationsFor(DocumentState.POSTGRESQL_PROVIDER, POSTGRESQL_SOURCE_SCHEMA),
+                sourceOperationClassificationsFor(DocumentState.SQLSERVER_PROVIDER, SQLSERVER_SOURCE_SCHEMA));
     }
 
-    private static Stream<Object[]> sourceOperationClassifications() {
+    private static Stream<Object[]> sourceOperationClassificationsFor(
+            final String provider,
+            final String sourceSchemaName) {
         return Stream.of(
                 classification(
-                        DocumentState.POSTGRESQL_PROVIDER, POSTGRESQL_SOURCE_SCHEMA, "DocumentCache", "c",
+                        provider, sourceSchemaName, "DocumentCache", "c",
                         DocumentState.SourceTable.DOCUMENT_CACHE, DocumentState.SourceOperation.CREATE,
                         DocumentState.OutputKind.PUBLIC_UPSERT),
                 classification(
-                        DocumentState.POSTGRESQL_PROVIDER, POSTGRESQL_SOURCE_SCHEMA, "DocumentCache", "u",
+                        provider, sourceSchemaName, "DocumentCache", "u",
                         DocumentState.SourceTable.DOCUMENT_CACHE, DocumentState.SourceOperation.UPDATE,
                         DocumentState.OutputKind.PUBLIC_UPSERT),
                 classification(
-                        DocumentState.POSTGRESQL_PROVIDER, POSTGRESQL_SOURCE_SCHEMA, "DocumentCache", "r",
+                        provider, sourceSchemaName, "DocumentCache", "r",
                         DocumentState.SourceTable.DOCUMENT_CACHE, DocumentState.SourceOperation.READ,
                         DocumentState.OutputKind.PUBLIC_UPSERT),
                 classification(
-                        DocumentState.POSTGRESQL_PROVIDER, POSTGRESQL_SOURCE_SCHEMA, "DocumentCache", "d",
+                        provider, sourceSchemaName, "DocumentCache", "d",
                         DocumentState.SourceTable.DOCUMENT_CACHE, DocumentState.SourceOperation.DELETE,
                         DocumentState.OutputKind.DROP),
                 classification(
-                        DocumentState.POSTGRESQL_PROVIDER, POSTGRESQL_SOURCE_SCHEMA, "DocumentCache", "t",
+                        provider, sourceSchemaName, "DocumentCache", "t",
                         DocumentState.SourceTable.DOCUMENT_CACHE, DocumentState.SourceOperation.TRUNCATE,
                         DocumentState.OutputKind.DROP),
                 classification(
-                        DocumentState.POSTGRESQL_PROVIDER, POSTGRESQL_SOURCE_SCHEMA, "Document", "d",
+                        provider, sourceSchemaName, "Document", "d",
                         DocumentState.SourceTable.DOCUMENT, DocumentState.SourceOperation.DELETE,
                         DocumentState.OutputKind.PUBLIC_TOMBSTONE),
                 classification(
-                        DocumentState.POSTGRESQL_PROVIDER, POSTGRESQL_SOURCE_SCHEMA, "Document", "c",
+                        provider, sourceSchemaName, "Document", "c",
                         DocumentState.SourceTable.DOCUMENT, DocumentState.SourceOperation.CREATE,
                         DocumentState.OutputKind.DROP),
                 classification(
-                        DocumentState.POSTGRESQL_PROVIDER, POSTGRESQL_SOURCE_SCHEMA, "Document", "u",
+                        provider, sourceSchemaName, "Document", "u",
                         DocumentState.SourceTable.DOCUMENT, DocumentState.SourceOperation.UPDATE,
                         DocumentState.OutputKind.DROP),
                 classification(
-                        DocumentState.POSTGRESQL_PROVIDER, POSTGRESQL_SOURCE_SCHEMA, "Document", "r",
+                        provider, sourceSchemaName, "Document", "r",
                         DocumentState.SourceTable.DOCUMENT, DocumentState.SourceOperation.READ,
                         DocumentState.OutputKind.DROP),
                 classification(
-                        DocumentState.POSTGRESQL_PROVIDER, POSTGRESQL_SOURCE_SCHEMA, "Document", "t",
+                        provider, sourceSchemaName, "Document", "t",
                         DocumentState.SourceTable.DOCUMENT, DocumentState.SourceOperation.TRUNCATE,
                         DocumentState.OutputKind.DROP),
                 classification(
-                        DocumentState.POSTGRESQL_PROVIDER, POSTGRESQL_SOURCE_SCHEMA, "CdcHeartbeat", "c",
+                        provider, sourceSchemaName, "CdcHeartbeat", "c",
                         DocumentState.SourceTable.HEARTBEAT, DocumentState.SourceOperation.CREATE,
                         DocumentState.OutputKind.PROGRESS),
                 classification(
-                        DocumentState.POSTGRESQL_PROVIDER, POSTGRESQL_SOURCE_SCHEMA, "CdcHeartbeat", "u",
+                        provider, sourceSchemaName, "CdcHeartbeat", "u",
                         DocumentState.SourceTable.HEARTBEAT, DocumentState.SourceOperation.UPDATE,
                         DocumentState.OutputKind.PROGRESS),
                 classification(
-                        DocumentState.POSTGRESQL_PROVIDER, POSTGRESQL_SOURCE_SCHEMA, "CdcHeartbeat", "r",
+                        provider, sourceSchemaName, "CdcHeartbeat", "r",
                         DocumentState.SourceTable.HEARTBEAT, DocumentState.SourceOperation.READ,
                         DocumentState.OutputKind.PROGRESS),
                 classification(
-                        DocumentState.POSTGRESQL_PROVIDER, POSTGRESQL_SOURCE_SCHEMA, "CdcHeartbeat", "d",
+                        provider, sourceSchemaName, "CdcHeartbeat", "d",
                         DocumentState.SourceTable.HEARTBEAT, DocumentState.SourceOperation.DELETE,
                         DocumentState.OutputKind.PROGRESS),
                 classification(
-                        DocumentState.SQLSERVER_PROVIDER, SQLSERVER_SOURCE_SCHEMA, "DocumentCache", "c",
-                        DocumentState.SourceTable.DOCUMENT_CACHE, DocumentState.SourceOperation.CREATE,
-                        DocumentState.OutputKind.PUBLIC_UPSERT),
-                classification(
-                        DocumentState.SQLSERVER_PROVIDER, SQLSERVER_SOURCE_SCHEMA, "Document", "d",
-                        DocumentState.SourceTable.DOCUMENT, DocumentState.SourceOperation.DELETE,
-                        DocumentState.OutputKind.PUBLIC_TOMBSTONE),
-                classification(
-                        DocumentState.SQLSERVER_PROVIDER, SQLSERVER_SOURCE_SCHEMA, "CdcHeartbeat", "u",
-                        DocumentState.SourceTable.HEARTBEAT, DocumentState.SourceOperation.UPDATE,
+                        provider, sourceSchemaName, "CdcHeartbeat", "t",
+                        DocumentState.SourceTable.HEARTBEAT, DocumentState.SourceOperation.TRUNCATE,
                         DocumentState.OutputKind.PROGRESS));
     }
 
@@ -262,14 +256,32 @@ class DocumentStateClassificationTest {
         };
     }
 
-    private static Stream<SourceRecord> recognizedDropRecords() {
+    private static Stream<Object[]> recognizedDropRecords() {
+        return Stream.concat(
+                recognizedDropRecordsFor(DocumentState.POSTGRESQL_PROVIDER, POSTGRESQL_SOURCE_SCHEMA),
+                recognizedDropRecordsFor(DocumentState.SQLSERVER_PROVIDER, SQLSERVER_SOURCE_SCHEMA));
+    }
+
+    private static Stream<Object[]> recognizedDropRecordsFor(
+            final String provider,
+            final String sourceSchemaName) {
         return Stream.of(
-                record(POSTGRESQL_SOURCE_SCHEMA, "dms", "DocumentCache", "d"),
-                record(POSTGRESQL_SOURCE_SCHEMA, "dms", "DocumentCache", "t"),
-                record(POSTGRESQL_SOURCE_SCHEMA, "dms", "Document", "c"),
-                record(POSTGRESQL_SOURCE_SCHEMA, "dms", "Document", "u"),
-                record(POSTGRESQL_SOURCE_SCHEMA, "dms", "Document", "r"),
-                record(POSTGRESQL_SOURCE_SCHEMA, "dms", "Document", "t"));
+                recognizedDrop(provider, record(sourceSchemaName, "dms", "DocumentCache", "d")),
+                recognizedDrop(provider, record(sourceSchemaName, "dms", "DocumentCache", "t")),
+                recognizedDrop(provider, record(sourceSchemaName, "dms", "Document", "c")),
+                recognizedDrop(provider, record(sourceSchemaName, "dms", "Document", "u")),
+                recognizedDrop(provider, record(sourceSchemaName, "dms", "Document", "r")),
+                recognizedDrop(provider, record(sourceSchemaName, "dms", "Document", "t")));
+    }
+
+    private static Object[] recognizedDrop(final String provider, final SourceRecord record) {
+        return new Object[] {provider, record};
+    }
+
+    private static Stream<Object[]> providerSourceSchemas() {
+        return Stream.of(
+                new Object[] {DocumentState.POSTGRESQL_PROVIDER, POSTGRESQL_SOURCE_SCHEMA},
+                new Object[] {DocumentState.SQLSERVER_PROVIDER, SQLSERVER_SOURCE_SCHEMA});
     }
 
     private static DocumentState<SourceRecord> configuredTransform(final String provider) {

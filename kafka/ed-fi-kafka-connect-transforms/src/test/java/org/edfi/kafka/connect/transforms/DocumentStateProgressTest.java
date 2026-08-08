@@ -87,10 +87,12 @@ class DocumentStateProgressTest {
                 new Object[] {DocumentState.POSTGRESQL_PROVIDER, "u"},
                 new Object[] {DocumentState.POSTGRESQL_PROVIDER, "r"},
                 new Object[] {DocumentState.POSTGRESQL_PROVIDER, "d"},
+                new Object[] {DocumentState.POSTGRESQL_PROVIDER, "t"},
                 new Object[] {DocumentState.SQLSERVER_PROVIDER, "c"},
                 new Object[] {DocumentState.SQLSERVER_PROVIDER, "u"},
                 new Object[] {DocumentState.SQLSERVER_PROVIDER, "r"},
-                new Object[] {DocumentState.SQLSERVER_PROVIDER, "d"});
+                new Object[] {DocumentState.SQLSERVER_PROVIDER, "d"},
+                new Object[] {DocumentState.SQLSERVER_PROVIDER, "t"});
     }
 
     private static Stream<Object[]> ignoredSourceKeys() {
