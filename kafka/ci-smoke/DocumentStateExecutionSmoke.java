@@ -53,22 +53,24 @@ public final class DocumentStateExecutionSmoke {
             expect(out.kafkaPartition() == null, "upsert partition");
             expect(out.keySchema() == Schema.STRING_SCHEMA, "upsert key schema");
             expect(DOCUMENT_UUID.equals(out.key()), "upsert key = " + out.key());
-            expect(out.valueSchema() == null, "upsert value schema");
+            expect(out.valueSchema() != null, "upsert value schema");
+            expect(out.valueSchema().type() == Schema.Type.STRUCT, "upsert value schema type");
+            expect(out.value() instanceof Struct, "upsert value");
             expect(out.timestamp() == null, "upsert timestamp");
             expect(!out.headers().iterator().hasNext(), "upsert headers stripped");
             expect(record.sourcePartition().equals(out.sourcePartition()), "upsert source partition");
             expect(record.sourceOffset().equals(out.sourceOffset()), "upsert source offset");
 
-            final Map<?, ?> value = (Map<?, ?>) out.value();
-            expect(Integer.valueOf(1).equals(value.get("contractVersion")), "upsert contractVersion");
-            expect(DOCUMENT_UUID.equals(value.get("documentUuid")), "upsert documentUuid");
-            expect(Long.valueOf(222L).equals(value.get("contentVersion")), "upsert contentVersion");
-            expect("2026-07-30T14:15:16Z".equals(value.get("lastModifiedAt")), "upsert lastModifiedAt");
+            final Struct value = (Struct) out.value();
+            expect(Integer.valueOf(1).equals(value.getInt32("contractVersion")), "upsert contractVersion");
+            expect(DOCUMENT_UUID.equals(value.getString("documentUuid")), "upsert documentUuid");
+            expect(Long.valueOf(222L).equals(value.getInt64("contentVersion")), "upsert contentVersion");
+            expect("2026-07-30T14:15:16Z".equals(value.getString("lastModifiedAt")), "upsert lastModifiedAt");
 
-            final Map<?, ?> document = (Map<?, ?>) value.get("document");
-            expect(DOCUMENT_UUID.equals(document.get("id")), "upsert document.id");
-            expect("222-01234567.j._.l.i".equals(document.get("_etag")), "upsert document._etag");
-            expect("2026-07-30T14:15:16Z".equals(document.get("_lastModifiedDate")),
+            final Struct document = value.getStruct("document");
+            expect(DOCUMENT_UUID.equals(document.getString("id")), "upsert document.id");
+            expect("222-01234567.j._.l.i".equals(document.getString("_etag")), "upsert document._etag");
+            expect("2026-07-30T14:15:16Z".equals(document.getString("_lastModifiedDate")),
                     "upsert document._lastModifiedDate");
         } finally {
             transform.close();

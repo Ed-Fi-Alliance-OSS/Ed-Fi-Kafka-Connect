@@ -56,6 +56,7 @@ class DocumentStateUpsertTest {
         assertThat(result.sourceOffset()).isEqualTo(record.sourceOffset());
 
         final Struct value = outputValue(result);
+        assertThat(value.schema()).isSameAs(result.valueSchema());
         assertThat(value.schema().fields()).extracting(Field::name).containsExactly(
                 "contractVersion",
                 "documentUuid",
@@ -65,9 +66,12 @@ class DocumentStateUpsertTest {
                 "contentVersion",
                 "lastModifiedAt",
                 "document");
-        assertThat(DocumentStateSharedFixtures.serializedPublicValue(result))
+        final JsonNode serializedValue = DocumentStateSharedFixtures.serializedPublicValue(result);
+        assertThat(serializedValue.has("schema")).isFalse();
+        assertThat(serializedValue.has("payload")).isFalse();
+        assertThat(serializedValue)
                 .isEqualTo(DocumentStateSharedFixtures.toJson(fixture.expectedEnvelope()));
-        assertThat(DocumentStateSharedFixtures.serializedPublicValue(result).toString())
+        assertThat(serializedValue.toString())
                 .doesNotContain("DocumentId")
                 .doesNotContain("ComputedAt")
                 .doesNotContain("\"source\"")
@@ -129,7 +133,7 @@ class DocumentStateUpsertTest {
     }
 
     @Test
-    void Given_DocumentJson_High_Precision_Decimal_Should_Serialize_Without_Rounding()
+    void Given_DocumentJson_Sample_Extension_Decimals_Should_Serialize_Without_Rounding()
             throws IOException {
         final Struct after = DocumentStateTestRecords
                 .cacheRowBuilder(DocumentState.POSTGRESQL_PROVIDER)
@@ -138,10 +142,12 @@ class DocumentStateUpsertTest {
                         DocumentStateTestRecords.documentJsonSchema(DocumentState.POSTGRESQL_PROVIDER),
                         "{\"id\":\"" + DocumentStateTestRecords.DOCUMENT_UUID
                                 + "\",\"_lastModifiedDate\":\"2026-07-30T14:15:16Z\","
-                                + "\"gradePointAverage\":" + HIGH_PRECISION_DECIMAL.toPlainString() + ","
-                                + "\"nested\":{\"gradePointAverage\":"
+                                + "\"_ext\":{\"sample\":{\"gpa\":"
+                                + HIGH_PRECISION_DECIMAL.toPlainString() + ","
+                                + "\"academicSummary\":{\"weightedGpa\":"
                                 + HIGH_PRECISION_DECIMAL.toPlainString() + "},"
-                                + "\"scores\":[1," + HIGH_PRECISION_DECIMAL.toPlainString() + "],"
+                                + "\"scoreHistory\":["
+                                + HIGH_PRECISION_DECIMAL.toPlainString() + "]}},"
                                 + "\"integerTooLarge\":" + OUT_OF_RANGE_INTEGER.toPlainString() + "}")
                 .build();
 
@@ -149,20 +155,23 @@ class DocumentStateUpsertTest {
                 .configuredTransform(DocumentState.POSTGRESQL_PROVIDER)
                 .apply(DocumentStateTestRecords.documentCacheRecord(DocumentState.POSTGRESQL_PROVIDER, after));
 
-        final JsonNode document = DocumentStateSharedFixtures.serializedPublicValue(result).get("document");
-        assertThat(document.get("gradePointAverage").isNumber()).isTrue();
-        assertThat(document.get("gradePointAverage").isTextual()).isFalse();
-        assertThat(document.get("gradePointAverage").decimalValue())
-                .isEqualByComparingTo(HIGH_PRECISION_DECIMAL);
-        assertThat(document.get("nested").get("gradePointAverage").decimalValue())
-                .isEqualByComparingTo(HIGH_PRECISION_DECIMAL);
-        assertThat(document.get("scores").get(0).isNumber()).isTrue();
-        assertThat(document.get("scores").get(0).decimalValue()).isEqualByComparingTo(BigDecimal.ONE);
-        assertThat(document.get("scores").get(1).decimalValue()).isEqualByComparingTo(HIGH_PRECISION_DECIMAL);
-        assertThat(document.get("integerTooLarge").isNumber()).isTrue();
-        assertThat(document.get("integerTooLarge").isTextual()).isFalse();
-        assertThat(document.get("integerTooLarge").decimalValue())
-                .isEqualByComparingTo(OUT_OF_RANGE_INTEGER);
+        assertSchemaBackedPublicUpsert(result);
+        final String serializedValue = DocumentStateSharedFixtures.serializedPublicValueText(result);
+        assertThat(serializedValue)
+                .doesNotContain("\"schema\"")
+                .doesNotContain("\"payload\"")
+                .contains("\"gpa\":" + HIGH_PRECISION_DECIMAL.toPlainString());
+
+        final JsonNode root = DocumentStateSharedFixtures.serializedPublicValue(result);
+        assertThat(root.has("schema")).isFalse();
+        assertThat(root.has("payload")).isFalse();
+        final JsonNode document = root.get("document");
+        final JsonNode sampleExtension = document.get("_ext").get("sample");
+        assertNumericDecimal(sampleExtension.get("gpa"), HIGH_PRECISION_DECIMAL);
+        assertNumericDecimal(
+                sampleExtension.get("academicSummary").get("weightedGpa"), HIGH_PRECISION_DECIMAL);
+        assertNumericDecimal(sampleExtension.get("scoreHistory").get(0), HIGH_PRECISION_DECIMAL);
+        assertNumericDecimal(document.get("integerTooLarge"), OUT_OF_RANGE_INTEGER);
     }
 
     @ParameterizedTest
@@ -285,11 +294,24 @@ class DocumentStateUpsertTest {
     }
 
     private static Struct outputValue(final SourceRecord result) {
+        assertSchemaBackedPublicUpsert(result);
         return (Struct) result.value();
     }
 
     private static Struct outputDocument(final Struct value) {
         return value.getStruct("document");
+    }
+
+    private static void assertSchemaBackedPublicUpsert(final SourceRecord result) {
+        assertThat(result.valueSchema()).isNotNull();
+        assertThat(result.valueSchema().type()).isEqualTo(Schema.Type.STRUCT);
+        assertThat(result.value()).isInstanceOf(Struct.class);
+    }
+
+    private static void assertNumericDecimal(final JsonNode node, final BigDecimal expected) {
+        assertThat(node.isNumber()).isTrue();
+        assertThat(node.isTextual()).isFalse();
+        assertThat(node.decimalValue().toPlainString()).isEqualTo(expected.toPlainString());
     }
 
     private static void assertFailure(final Throwable thrown, final DocumentState.FailureReason expectedReason) {

@@ -6,6 +6,7 @@
 package org.edfi.kafka.connect.transforms;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Locale;
@@ -59,11 +60,19 @@ final class DocumentStateSharedFixtures {
     }
 
     static JsonNode serializedPublicValue(final SourceRecord record) throws IOException {
+        return MAPPER.readTree(serializedPublicValueBytes(record));
+    }
+
+    static String serializedPublicValueText(final SourceRecord record) {
+        return new String(serializedPublicValueBytes(record), StandardCharsets.UTF_8);
+    }
+
+    private static byte[] serializedPublicValueBytes(final SourceRecord record) {
         final JsonConverter converter = new JsonConverter();
         converter.configure(Map.of(
                 "schemas.enable", "false",
                 "decimal.format", "NUMERIC"), false);
-        return MAPPER.readTree(converter.fromConnectData(record.topic(), record.valueSchema(), record.value()));
+        return converter.fromConnectData(record.topic(), record.valueSchema(), record.value());
     }
 
     private static Path fixtureRoot() {
