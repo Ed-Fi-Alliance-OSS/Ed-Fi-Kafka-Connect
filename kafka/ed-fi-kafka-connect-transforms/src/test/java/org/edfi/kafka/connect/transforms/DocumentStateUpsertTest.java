@@ -174,6 +174,31 @@ class DocumentStateUpsertTest {
         assertNumericDecimal(document.get("integerTooLarge"), OUT_OF_RANGE_INTEGER);
     }
 
+    @Test
+    void Given_DocumentJson_Mixed_Scale_Decimals_Should_Preserve_Exact_Number_Text() {
+        final Struct after = DocumentStateTestRecords
+                .cacheRowBuilder(DocumentState.POSTGRESQL_PROVIDER)
+                .field(
+                        DocumentStateTestRecords.DOCUMENT_JSON_FIELD,
+                        DocumentStateTestRecords.documentJsonSchema(DocumentState.POSTGRESQL_PROVIDER),
+                        "{\"id\":\"" + DocumentStateTestRecords.DOCUMENT_UUID
+                                + "\",\"_lastModifiedDate\":\"2026-07-30T14:15:16Z\","
+                                + "\"scores\":[1,1.20," + HIGH_PRECISION_DECIMAL.toPlainString() + "],"
+                                + "\"results\":[{\"score\":1},{\"score\":1.20},{\"score\":"
+                                + HIGH_PRECISION_DECIMAL.toPlainString() + "}]}")
+                .build();
+
+        final SourceRecord result = DocumentStateTestRecords
+                .configuredTransform(DocumentState.POSTGRESQL_PROVIDER)
+                .apply(DocumentStateTestRecords.documentCacheRecord(DocumentState.POSTGRESQL_PROVIDER, after));
+
+        final String serializedValue = DocumentStateSharedFixtures.serializedPublicValueText(result);
+        assertThat(serializedValue)
+                .contains("\"scores\":[1,1.20," + HIGH_PRECISION_DECIMAL.toPlainString() + "]")
+                .contains("\"results\":[{\"score\":1},{\"score\":1.20},{\"score\":"
+                        + HIGH_PRECISION_DECIMAL.toPlainString() + "}]");
+    }
+
     @ParameterizedTest
     @MethodSource("malformedDocumentJsonRows")
     void Given_Malformed_DocumentJson_Should_Fail_With_Stable_Reason(

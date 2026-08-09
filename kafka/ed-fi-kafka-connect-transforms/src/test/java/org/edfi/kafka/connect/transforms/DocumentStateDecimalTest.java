@@ -6,6 +6,7 @@
 package org.edfi.kafka.connect.transforms;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
@@ -62,6 +63,21 @@ class DocumentStateDecimalTest {
         assertNumericDecimal(root.get("nested").get("gradePointAverage"), HIGH_PRECISION_DECIMAL);
         assertNumericDecimal(root.get("scores").get(0), firstScore);
         assertNumericDecimal(root.get("scores").get(1), secondScore);
+    }
+
+    @Test
+    void Given_Mixed_Scale_Decimal_Array_Should_Preserve_Exact_Number_Text() {
+        final Schema valueSchema = SchemaBuilder.struct()
+                .field("scores", SchemaBuilder.array(Decimal.schema(2)).build())
+                .build();
+        final Struct value = new Struct(valueSchema)
+                .put("scores", List.of(new BigDecimal("1"), new BigDecimal("1.20")));
+
+        final String json = new String(
+                numericDecimalConverter().fromConnectData(TOPIC, valueSchema, value),
+                StandardCharsets.UTF_8);
+
+        assertThat(json).isEqualTo("{\"scores\":[1,1.20]}");
     }
 
     @Test

@@ -311,7 +311,7 @@ final class DocumentStateJsonValueBuilder {
         final Schema schema = Decimal.builder(scale).optional().build();
         final List<Object> values = new ArrayList<>(nodes.size());
         for (final JsonNode node : nodes) {
-            values.add(isNull(node) ? null : decimalValue(node, scale));
+            values.add(isNull(node) ? null : node.decimalValue());
         }
         return new InferredValues(schema, values);
     }
@@ -348,10 +348,6 @@ final class DocumentStateJsonValueBuilder {
 
     private static int normalizedScale(final BigDecimal value) {
         return Math.max(0, value.scale());
-    }
-
-    private static BigDecimal decimalValue(final JsonNode node, final int scale) {
-        return node.decimalValue().setScale(scale);
     }
 
     private static InferredValues booleanValues(final List<JsonNode> nodes) {
