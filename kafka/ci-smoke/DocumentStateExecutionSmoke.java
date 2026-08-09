@@ -3,6 +3,9 @@
 // The Ed-Fi Alliance licenses this file to you under the Apache License, Version 2.0.
 // See the LICENSE and NOTICES files in the project root for more information.
 
+import java.io.IOException;
+import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 import org.apache.kafka.connect.data.Schema;
@@ -11,7 +14,14 @@ import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.header.ConnectHeaders;
 import org.apache.kafka.connect.header.Header;
 import org.apache.kafka.connect.header.Headers;
+import org.apache.kafka.connect.json.JsonConverter;
 import org.apache.kafka.connect.source.SourceRecord;
+
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 
 import org.edfi.kafka.connect.transforms.DocumentState;
 
@@ -28,12 +38,19 @@ public final class DocumentStateExecutionSmoke {
     private static final String POSTGRESQL_UUID_SCHEMA = "io.debezium.data.Uuid";
     private static final String POSTGRESQL_JSON_SCHEMA = "io.debezium.data.Json";
     private static final String POSTGRESQL_TIMESTAMP_SCHEMA = "io.debezium.time.ZonedTimestamp";
+    private static final BigDecimal HIGH_PRECISION_DECIMAL =
+            new BigDecimal("3.141592653589793238462643383279");
+    private static final ObjectMapper MAPPER = JsonMapper.builder()
+            .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+            .nodeFactory(JsonNodeFactory.withExactBigDecimals(true))
+            .build();
 
     private DocumentStateExecutionSmoke() {
     }
 
-    public static void main(final String[] args) {
+    public static void main(final String[] args) throws IOException {
         smokePublicUpsert();
+        smokePublicUpsertDecimalSerialization();
         smokePublicTombstone();
         smokeProgressRecord();
         smokeMalformedRetainedRecordFailure();
@@ -72,6 +89,48 @@ public final class DocumentStateExecutionSmoke {
             expect("222-01234567.j._.l.i".equals(document.getString("_etag")), "upsert document._etag");
             expect("2026-07-30T14:15:16Z".equals(document.getString("_lastModifiedDate")),
                     "upsert document._lastModifiedDate");
+        } finally {
+            transform.close();
+        }
+    }
+
+    private static void smokePublicUpsertDecimalSerialization() throws IOException {
+        final DocumentState<SourceRecord> transform = configuredTransform();
+        try {
+            final SourceRecord record = documentCacheRecord(
+                    cacheRow(decimalDocumentJson(DOCUMENT_UUID)), 988L,
+                    new ConnectHeaders().addString("source-header", "stripped"));
+
+            final SourceRecord out = transform.apply(record);
+
+            expect(TARGET_TOPIC.equals(out.topic()), "decimal upsert topic = " + out.topic());
+            expect(out.keySchema() == Schema.STRING_SCHEMA, "decimal upsert key schema");
+            expect(DOCUMENT_UUID.equals(out.key()), "decimal upsert key = " + out.key());
+            expect(out.valueSchema() != null, "decimal upsert value schema");
+            expect(out.valueSchema().type() == Schema.Type.STRUCT, "decimal upsert value schema type");
+            expect(out.value() instanceof Struct, "decimal upsert value");
+
+            final byte[] serialized = serializedPublicValue(out);
+            final String serializedText = new String(serialized, StandardCharsets.UTF_8);
+            expect(!serializedText.contains("\"schema\""), "decimal upsert has no schema wrapper");
+            expect(!serializedText.contains("\"payload\""), "decimal upsert has no payload wrapper");
+            expect(serializedText.contains("\"gpa\":" + HIGH_PRECISION_DECIMAL.toPlainString()),
+                    "decimal upsert gpa is unquoted in " + serializedText);
+            expect(!serializedText.contains("\"gpa\":\""), "decimal upsert gpa is not a string");
+
+            final JsonNode root = MAPPER.readTree(serialized);
+            expect(!root.has("schema"), "decimal upsert parsed has no schema wrapper");
+            expect(!root.has("payload"), "decimal upsert parsed has no payload wrapper");
+            final JsonNode sampleExtension = root.get("document").get("_ext").get("sample");
+            expectNumericDecimal(sampleExtension.get("gpa"), HIGH_PRECISION_DECIMAL, "decimal gpa");
+            expectNumericDecimal(
+                    sampleExtension.get("academicSummary").get("weightedGpa"),
+                    HIGH_PRECISION_DECIMAL,
+                    "decimal weightedGpa");
+            expectNumericDecimal(
+                    sampleExtension.get("scoreHistory").get(0),
+                    HIGH_PRECISION_DECIMAL,
+                    "decimal scoreHistory");
         } finally {
             transform.close();
         }
@@ -260,6 +319,37 @@ public final class DocumentStateExecutionSmoke {
     private static String validDocumentJson(final String documentUuid) {
         return "{\"id\":\"" + documentUuid
                 + "\",\"_lastModifiedDate\":\"2026-07-30T14:15:16Z\",\"schoolId\":255901}";
+    }
+
+    private static String decimalDocumentJson(final String documentUuid) {
+        return "{\"id\":\"" + documentUuid
+                + "\",\"_lastModifiedDate\":\"2026-07-30T14:15:16Z\","
+                + "\"_ext\":{\"sample\":{\"gpa\":"
+                + HIGH_PRECISION_DECIMAL.toPlainString()
+                + ",\"academicSummary\":{\"weightedGpa\":"
+                + HIGH_PRECISION_DECIMAL.toPlainString()
+                + "},\"scoreHistory\":["
+                + HIGH_PRECISION_DECIMAL.toPlainString()
+                + "]}}}";
+    }
+
+    private static byte[] serializedPublicValue(final SourceRecord record) {
+        final JsonConverter converter = new JsonConverter();
+        converter.configure(Map.of(
+                "schemas.enable", "false",
+                "decimal.format", "NUMERIC"), false);
+        return converter.fromConnectData(record.topic(), record.valueSchema(), record.value());
+    }
+
+    private static void expectNumericDecimal(
+            final JsonNode node,
+            final BigDecimal expected,
+            final String detail) {
+        expect(node != null, detail + " present");
+        expect(node.isNumber(), detail + " is numeric");
+        expect(!node.isTextual(), detail + " is not textual");
+        expect(expected.compareTo(node.decimalValue()) == 0, detail + " = " + node);
+        expect(expected.toPlainString().equals(node.decimalValue().toPlainString()), detail + " exact text");
     }
 
     private static void expect(final boolean condition, final String detail) {
