@@ -208,9 +208,15 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
 
     private static boolean isNativeHeartbeat(final ConnectRecord<?> record) {
         final String topic = record.topic();
-        return topic != null
-                && topic.startsWith(NATIVE_HEARTBEAT_TOPIC_PREFIX)
-                && topic.length() > NATIVE_HEARTBEAT_TOPIC_PREFIX.length();
+        if (topic == null || !topic.startsWith(NATIVE_HEARTBEAT_TOPIC_PREFIX)) {
+            return false;
+        }
+
+        final String sourceServer = DocumentStateJson.sourcePartitionServer(record);
+        if (sourceServer == null || sourceServer.isEmpty()) {
+            throw transformationFailure(FailureReason.MALFORMED_NATIVE_HEARTBEAT, null, record, null, null);
+        }
+        return topic.equals(NATIVE_HEARTBEAT_TOPIC_PREFIX + sourceServer);
     }
 
     private static SourceOperation sourceOperation(
@@ -427,6 +433,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
         MISSING_OPERATION_METADATA("missing operation metadata"),
         UNSUPPORTED_OPERATION_METADATA_SHAPE("unsupported operation metadata shape"),
         UNKNOWN_OPERATION_CODE("unknown operation code"),
+        MALFORMED_NATIVE_HEARTBEAT("malformed native heartbeat"),
         UNSUPPORTED_SOURCE_SCHEMA("unsupported source schema"),
         UNSUPPORTED_SOURCE_TABLE("unsupported source table"),
         UNEXPECTED_RETAINED_SOURCE_TABLE("unexpected retained source table"),

@@ -122,12 +122,12 @@ class DocumentStateProgressTest {
 
         return Stream.of(
                 DocumentStateTestRecords.nativeHeartbeatRecord(
-                        "__debezium-heartbeat.instance", null, null, null, null, TIMESTAMP, headers()),
+                        "__debezium-heartbeat.dms", null, null, null, null, TIMESTAMP, headers()),
                 DocumentStateTestRecords.nativeHeartbeatRecord(
-                        "__debezium-heartbeat.instance", Schema.STRING_SCHEMA, "source-key",
+                        "__debezium-heartbeat.dms", Schema.STRING_SCHEMA, "source-key",
                         heartbeatValueSchema, heartbeatValue, TIMESTAMP, headers()),
                 DocumentStateTestRecords.nativeHeartbeatRecord(
-                        "__debezium-heartbeat.instance", (Schema) schemaBackedKey[0],
+                        "__debezium-heartbeat.dms", (Schema) schemaBackedKey[0],
                         schemaBackedKey[1], null, null, TIMESTAMP, headers()));
     }
 

@@ -11,11 +11,13 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
+import java.util.Map;
 
 import org.apache.kafka.connect.connector.ConnectRecord;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.header.ConnectHeaders;
+import org.apache.kafka.connect.source.SourceRecord;
 
 final class DocumentStateJson {
 
@@ -77,6 +79,23 @@ final class DocumentStateJson {
 
         final Instant wholeSecondInstant = timestamp.toInstant().truncatedTo(ChronoUnit.SECONDS);
         return UTC_SECONDS_FORMATTER.format(wholeSecondInstant);
+    }
+
+    static String sourcePartitionServer(final ConnectRecord<?> record) {
+        if (!(record instanceof SourceRecord)) {
+            return null;
+        }
+
+        final Map<String, ?> sourcePartition = ((SourceRecord) record).sourcePartition();
+        if (sourcePartition == null) {
+            return null;
+        }
+
+        final Object sourceServer = sourcePartition.get("server");
+        if (!(sourceServer instanceof String)) {
+            return null;
+        }
+        return (String) sourceServer;
     }
 
     private static DocumentState.TransformationFailureException failure(

@@ -53,7 +53,7 @@ class DocumentStateClassificationTest {
     void Given_Native_Debezium_Heartbeat_With_Null_Value_Should_Classify_As_Progress() {
         final DocumentState<SourceRecord> transform = configuredTransform(DocumentState.POSTGRESQL_PROVIDER);
         final SourceRecord record = new SourceRecord(
-                sourcePartition(), sourceOffset(), "__debezium-heartbeat.instance", null, null, null, null);
+                sourcePartition(), sourceOffset(), "__debezium-heartbeat.dms", null, null, null, null);
 
         final DocumentState.ClassifiedRecord classifiedRecord = transform.classify(record);
 
@@ -61,6 +61,20 @@ class DocumentStateClassificationTest {
         assertThat(classifiedRecord.sourceTable()).isNull();
         assertThat(classifiedRecord.sourceOperation()).isNull();
         assertThat(classifiedRecord.outputKind()).isEqualTo(DocumentState.OutputKind.PROGRESS);
+    }
+
+    @ParameterizedTest
+    @MethodSource("malformedNativeHeartbeatSourcePartitions")
+    void Given_Native_Debezium_Heartbeat_With_Invalid_Source_Server_Should_Fail(
+            final Map<String, ?> sourcePartition) {
+        final DocumentState<SourceRecord> transform = configuredTransform(DocumentState.POSTGRESQL_PROVIDER);
+        final SourceRecord record =
+                nativeHeartbeatRecord("__debezium-heartbeat.dms", sourcePartition);
+
+        assertThatThrownBy(() -> transform.classify(record))
+                .isInstanceOf(DocumentState.TransformationFailureException.class)
+                .extracting("reason")
+                .isEqualTo(DocumentState.FailureReason.MALFORMED_NATIVE_HEARTBEAT);
     }
 
     @Test
@@ -72,6 +86,25 @@ class DocumentStateClassificationTest {
         assertThatThrownBy(() -> transform.classify(record))
                 .isInstanceOf(DataException.class)
                 .hasMessageContaining("missing source metadata");
+    }
+
+    @Test
+    void Given_Relational_Table_Topic_With_Heartbeat_Looking_Source_Prefix_Should_Classify_From_Source_Metadata() {
+        final DocumentState<SourceRecord> transform = configuredTransform(DocumentState.POSTGRESQL_PROVIDER);
+        final SourceRecord record = record(
+                "__debezium-heartbeat.instance.dms.DocumentCache",
+                sourcePartition("__debezium-heartbeat.instance"),
+                POSTGRESQL_SOURCE_SCHEMA,
+                "dms",
+                "DocumentCache",
+                "c");
+
+        final DocumentState.ClassifiedRecord classifiedRecord = transform.classify(record);
+
+        assertThat(classifiedRecord.sourceCategory()).isEqualTo(DocumentState.SourceCategory.RELATIONAL);
+        assertThat(classifiedRecord.sourceTable()).isEqualTo(DocumentState.SourceTable.DOCUMENT_CACHE);
+        assertThat(classifiedRecord.sourceOperation()).isEqualTo(DocumentState.SourceOperation.CREATE);
+        assertThat(classifiedRecord.outputKind()).isEqualTo(DocumentState.OutputKind.PUBLIC_UPSERT);
     }
 
     @ParameterizedTest
@@ -237,6 +270,13 @@ class DocumentStateClassificationTest {
                         DocumentState.OutputKind.PROGRESS));
     }
 
+    private static Stream<Object[]> malformedNativeHeartbeatSourcePartitions() {
+        return Stream.of(
+                new Object[] {Map.of()},
+                new Object[] {sourcePartition("")},
+                new Object[] {sourcePartition(123)});
+    }
+
     private static Object[] classification(
             final String provider,
             final String sourceSchemaName,
@@ -299,6 +339,16 @@ class DocumentStateClassificationTest {
             final String sourceSchema,
             final String sourceTable,
             final String operation) {
+        return record(TOPIC, sourcePartition(), sourceSchemaName, sourceSchema, sourceTable, operation);
+    }
+
+    private static SourceRecord record(
+            final String topic,
+            final Map<String, ?> sourcePartition,
+            final String sourceSchemaName,
+            final String sourceSchema,
+            final String sourceTable,
+            final String operation) {
         final Schema sourceStructSchema = sourceSchema(sourceSchemaName);
         final Schema valueSchema = SchemaBuilder.struct()
                 .field("source", sourceStructSchema)
@@ -307,11 +357,25 @@ class DocumentStateClassificationTest {
         final Struct value = new Struct(valueSchema)
                 .put("source", source(sourceStructSchema, sourceSchema, sourceTable))
                 .put("op", operation);
-        return record(valueSchema, value);
+        return record(topic, sourcePartition, valueSchema, value);
     }
 
     private static SourceRecord record(final Schema valueSchema, final Struct value) {
-        return new SourceRecord(sourcePartition(), sourceOffset(), TOPIC, null, null, null, valueSchema, value);
+        return record(TOPIC, sourcePartition(), valueSchema, value);
+    }
+
+    private static SourceRecord record(
+            final String topic,
+            final Map<String, ?> sourcePartition,
+            final Schema valueSchema,
+            final Struct value) {
+        return new SourceRecord(sourcePartition, sourceOffset(), topic, null, null, null, valueSchema, value);
+    }
+
+    private static SourceRecord nativeHeartbeatRecord(
+            final String topic,
+            final Map<String, ?> sourcePartition) {
+        return new SourceRecord(sourcePartition, sourceOffset(), topic, null, null, null, null);
     }
 
     private static Schema sourceSchema(final String sourceSchemaName) {
@@ -330,6 +394,10 @@ class DocumentStateClassificationTest {
 
     private static Map<String, String> sourcePartition() {
         return Map.of("server", "dms");
+    }
+
+    private static Map<String, ?> sourcePartition(final Object server) {
+        return Map.of("server", server);
     }
 
     private static Map<String, Long> sourceOffset() {

@@ -104,7 +104,7 @@ public final class DocumentStateExecutionSmoke {
         try {
             final Headers headers = new ConnectHeaders().addString("source-header", "kept");
             final SourceRecord record = new SourceRecord(
-                    sourcePartition(), sourceOffset(), "__debezium-heartbeat.instance", null,
+                    sourcePartition(), sourceOffset(), "__debezium-heartbeat.dms", null,
                     Schema.STRING_SCHEMA, "ignored-source-key", null, null, 321L, headers);
 
             final SourceRecord out = transform.apply(record);
