@@ -199,6 +199,26 @@ class DocumentStateUpsertTest {
                         + HIGH_PRECISION_DECIMAL.toPlainString() + "}]");
     }
 
+    @Test
+    void Given_DocumentJson_Homogeneous_Object_Array_With_Null_Should_Preserve_Serialized_Shape() {
+        final Struct after = DocumentStateTestRecords
+                .cacheRowBuilder(DocumentState.POSTGRESQL_PROVIDER)
+                .field(
+                        DocumentStateTestRecords.DOCUMENT_JSON_FIELD,
+                        DocumentStateTestRecords.documentJsonSchema(DocumentState.POSTGRESQL_PROVIDER),
+                        "{\"id\":\"" + DocumentStateTestRecords.DOCUMENT_UUID
+                                + "\",\"_lastModifiedDate\":\"2026-07-30T14:15:16Z\","
+                                + "\"items\":[{\"a\":1,\"b\":\"first\"},null,{\"b\":\"second\",\"a\":2}]}")
+                .build();
+
+        final SourceRecord result = DocumentStateTestRecords
+                .configuredTransform(DocumentState.POSTGRESQL_PROVIDER)
+                .apply(DocumentStateTestRecords.documentCacheRecord(DocumentState.POSTGRESQL_PROVIDER, after));
+
+        assertThat(DocumentStateSharedFixtures.serializedPublicValueText(result))
+                .contains("\"items\":[{\"a\":1,\"b\":\"first\"},null,{\"a\":2,\"b\":\"second\"}]");
+    }
+
     @ParameterizedTest
     @MethodSource("malformedDocumentJsonRows")
     void Given_Malformed_DocumentJson_Should_Fail_With_Stable_Reason(
@@ -254,6 +274,11 @@ class DocumentStateUpsertTest {
                         "{\"id\":\"" + DocumentStateTestRecords.DOCUMENT_UUID
                                 + "\",\"_lastModifiedDate\":\"2026-07-30T14:15:16Z\","
                                 + "\"mixed\":[1,\"one\"]}",
+                        DocumentState.FailureReason.INVALID_DOCUMENT_JSON),
+                malformedDocumentJson(DocumentState.POSTGRESQL_PROVIDER,
+                        "{\"id\":\"" + DocumentStateTestRecords.DOCUMENT_UUID
+                                + "\",\"_lastModifiedDate\":\"2026-07-30T14:15:16Z\","
+                                + "\"items\":[{\"a\":1},{\"b\":2}]}",
                         DocumentState.FailureReason.INVALID_DOCUMENT_JSON),
                 malformedDocumentJson(DocumentState.SQLSERVER_PROVIDER, "__debezium_unavailable_value",
                         DocumentState.FailureReason.UNAVAILABLE_DOCUMENT_JSON));

@@ -208,6 +208,7 @@ final class DocumentStateJsonValueBuilder {
             final List<JsonNode> nodes,
             final ConnectRecord<?> record,
             final DocumentState.ClassifiedRecord classifiedRecord) {
+        requireHomogeneousObjectFields(nodes, record, classifiedRecord);
         final LinkedHashMap<String, List<JsonNode>> fieldNodes = objectFieldNodes(nodes);
         final LinkedHashMap<String, InferredValues> fields = new LinkedHashMap<>();
         final SchemaBuilder schemaBuilder = SchemaBuilder.struct().optional();
@@ -223,6 +224,40 @@ final class DocumentStateJsonValueBuilder {
             values.add(objectValue(nodes.get(index), schema, fields, index));
         }
         return new InferredValues(schema, values);
+    }
+
+    private static void requireHomogeneousObjectFields(
+            final List<JsonNode> nodes,
+            final ConnectRecord<?> record,
+            final DocumentState.ClassifiedRecord classifiedRecord) {
+        JsonNode expectedObject = NullNode.getInstance();
+        boolean foundObject = false;
+        for (final JsonNode node : nodes) {
+            if (isNull(node)) {
+                continue;
+            }
+
+            if (!foundObject) {
+                expectedObject = node;
+                foundObject = true;
+            } else if (!hasSameFieldNames(expectedObject, node)) {
+                throw failure(DocumentState.FailureReason.INVALID_DOCUMENT_JSON, record, classifiedRecord);
+            }
+        }
+    }
+
+    private static boolean hasSameFieldNames(final JsonNode first, final JsonNode second) {
+        if (first.size() != second.size()) {
+            return false;
+        }
+
+        final Iterator<String> it = first.fieldNames();
+        while (it.hasNext()) {
+            if (!second.has(it.next())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static LinkedHashMap<String, List<JsonNode>> objectFieldNodes(final List<JsonNode> nodes) {
