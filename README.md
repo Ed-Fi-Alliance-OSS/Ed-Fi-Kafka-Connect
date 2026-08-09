@@ -73,6 +73,39 @@ transforms.ExpandJson.sourceFields=DocumentJson
 > passing the record through, and dot-delimited nested paths in `sourceFields` are not
 > supported.
 
+### `DocumentState`
+
+This DMS-specific transformation converts raw schema-backed Debezium records for the
+relational `dms.DocumentCache`, `dms.Document`, and `dms.CdcHeartbeat` sources into the Ed-Fi
+document-state topic contract and its internal CDC progress topic. It is configured with only
+the provider and the two binding-scoped target topics:
+
+```properties
+transforms=documentState
+transforms.documentState.type=org.edfi.kafka.connect.transforms.DocumentState
+transforms.documentState.provider=<postgresql|sqlserver>
+transforms.documentState.target.topic=<instance document topic>
+transforms.documentState.progress.topic=<instance document topic>.cdc-progress
+```
+
+Public upserts emitted by `DocumentState` are Kafka Connect schema-backed values: the record
+has a non-null `STRUCT` value schema and a matching `Struct` value. The public Kafka value
+contract is still the serialized UTF-8 JSON bytes produced by Kafka Connect's
+`JsonConverter`, not that private in-memory shape. Use these converter settings for the
+relational document-state topic:
+
+```properties
+value.converter=org.apache.kafka.connect.json.JsonConverter
+value.converter.schemas.enable=false
+value.converter.decimal.format=NUMERIC
+```
+
+With `schemas.enable=false`, the serialized Kafka bytes are a plain JSON object with no
+Kafka Connect `schema` or `payload` wrapper: schema-less public JSON bytes. With
+`decimal.format=NUMERIC`, exact `DocumentJson` decimal values represented through Connect
+`Decimal` logical fields publish as unquoted JSON numbers instead of Base64 bytes. Do not
+replace this with `Double`/`Float`, string conversion, Avro, Protobuf, Schema Registry, or a
+custom public converter for the v1 document-state contract.
 
 ## Running transformations
 
