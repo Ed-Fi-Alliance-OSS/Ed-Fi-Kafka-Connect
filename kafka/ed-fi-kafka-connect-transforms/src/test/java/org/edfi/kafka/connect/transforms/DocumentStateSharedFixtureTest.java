@@ -8,11 +8,11 @@ package org.edfi.kafka.connect.transforms;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Map;
 import java.util.stream.Stream;
 
 import org.apache.kafka.connect.data.Field;
 import org.apache.kafka.connect.data.Schema;
+import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.source.SourceRecord;
 
 import org.junit.jupiter.api.Test;
@@ -44,10 +44,12 @@ class DocumentStateSharedFixtureTest {
         assertThat(result.kafkaPartition()).isNull();
         assertThat(result.keySchema()).isSameAs(Schema.STRING_SCHEMA);
         assertThat(result.key()).isEqualTo(fixture.documentUuid());
-        assertThat(result.valueSchema()).isNull();
+        assertThat(result.valueSchema()).isNotNull();
+        assertThat(result.valueSchema().type()).isEqualTo(Schema.Type.STRUCT);
+        assertThat(result.value()).isInstanceOf(Struct.class);
         assertThat(result.timestamp()).isNull();
         assertThat(result.headers()).isEmpty();
-        assertThat(DocumentStateSharedFixtures.toJson(outputValue(result)))
+        assertThat(DocumentStateSharedFixtures.serializedPublicValue(result))
                 .isEqualTo(DocumentStateSharedFixtures.toJson(fixture.expectedEnvelope()));
         assertThat(fixture.expectedDocument().has(expectedDocumentField)).isTrue();
     }
@@ -157,10 +159,5 @@ class DocumentStateSharedFixtureTest {
             return DocumentStateTestRecords.POSTGRESQL_TIMESTAMP_SCHEMA;
         }
         return DocumentStateTestRecords.SQLSERVER_TIMESTAMP_SCHEMA;
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Map<String, Object> outputValue(final SourceRecord result) {
-        return (Map<String, Object>) result.value();
     }
 }

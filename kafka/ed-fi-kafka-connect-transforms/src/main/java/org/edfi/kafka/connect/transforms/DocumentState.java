@@ -159,7 +159,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
             final R record,
             final ClassifiedRecord classifiedRecord,
             final ValidatedDocumentKey documentKey) {
-        final Map<String, Object> value =
+        final DocumentStateJson.SchemaBackedValue value =
                 settings.sourceAdapter().publicUpsertValue(record, classifiedRecord, documentKey);
         return DocumentStateJson.publicUpsertRecord(record, settings.targetTopic(), documentKey, value);
     }
@@ -313,26 +313,6 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
             default:
                 throw transformationFailure(
                         FailureReason.UNSUPPORTED_SOURCE_OPERATION, null, sourceMetadata, sourceOperation.code());
-        }
-    }
-
-    private static void validatePublicDocument(
-            final ValidatedDocumentKey documentKey,
-            final RetainedCacheRow row,
-            final Map<String, Object> document,
-            final ConnectRecord<?> record,
-            final ClassifiedRecord classifiedRecord) {
-        if (!documentKey.value().equals(row.documentUuid())) {
-            throw classifiedFailure(FailureReason.DOCUMENT_UUID_MISMATCH, record, classifiedRecord);
-        }
-        if (!documentKey.value().equals(document.get(PUBLIC_DOCUMENT_ID_FIELD))) {
-            throw classifiedFailure(FailureReason.PUBLIC_DOCUMENT_INVARIANT_MISMATCH, record, classifiedRecord);
-        }
-        if (!row.lastModifiedAt().equals(document.get(PUBLIC_DOCUMENT_LAST_MODIFIED_DATE_FIELD))) {
-            throw classifiedFailure(FailureReason.PUBLIC_DOCUMENT_INVARIANT_MISMATCH, record, classifiedRecord);
-        }
-        if (!row.streamEtag().equals(document.get(PUBLIC_DOCUMENT_ETAG_FIELD))) {
-            throw classifiedFailure(FailureReason.PUBLIC_DOCUMENT_INVARIANT_MISMATCH, record, classifiedRecord);
         }
     }
 
@@ -831,25 +811,12 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
                     FailureReason.UNSUPPORTED_DOCUMENT_UUID_SHAPE);
         }
 
-        Map<String, Object> publicUpsertValue(
+        DocumentStateJson.SchemaBackedValue publicUpsertValue(
                 final ConnectRecord<?> record,
                 final ClassifiedRecord classifiedRecord,
                 final ValidatedDocumentKey documentKey) {
             final RetainedCacheRow row = cacheRow(record, classifiedRecord);
-            final Map<String, Object> document =
-                    DocumentStateJson.parseDocumentJson(row, record, classifiedRecord);
-            validatePublicDocument(documentKey, row, document, record, classifiedRecord);
-
-            final Map<String, Object> value = new LinkedHashMap<>();
-            value.put(PUBLIC_CONTRACT_VERSION_FIELD, CONTRACT_VERSION);
-            value.put(PUBLIC_DOCUMENT_UUID_FIELD, documentKey.value());
-            value.put(PUBLIC_PROJECT_NAME_FIELD, row.projectName());
-            value.put(PUBLIC_RESOURCE_NAME_FIELD, row.resourceName());
-            value.put(PUBLIC_RESOURCE_VERSION_FIELD, row.resourceVersion());
-            value.put(PUBLIC_CONTENT_VERSION_FIELD, row.contentVersion());
-            value.put(PUBLIC_LAST_MODIFIED_AT_FIELD, row.lastModifiedAt());
-            value.put(PUBLIC_DOCUMENT_FIELD, document);
-            return value;
+            return DocumentStateJson.publicUpsertValue(row, documentKey, record, classifiedRecord);
         }
 
         void validateDeleteBeforeDocumentUuid(

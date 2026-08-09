@@ -9,20 +9,28 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Locale;
+import java.util.Map;
 
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.Struct;
+import org.apache.kafka.connect.json.JsonConverter;
 import org.apache.kafka.connect.source.SourceRecord;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 final class DocumentStateSharedFixtures {
 
     static final String FIXTURE_ROOT_PROPERTY = "edfiDmsMaterializedDocumentFixtureRoot";
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ObjectMapper MAPPER = JsonMapper.builder()
+            .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+            .nodeFactory(JsonNodeFactory.withExactBigDecimals(true))
+            .build();
     private static final String CACHE_ROW_FILE = "expected-cache-row.json";
     private static final String PUBLIC_DOCUMENT_FILE = "expected-public-cdc-document.json";
 
@@ -48,6 +56,14 @@ final class DocumentStateSharedFixtures {
 
     static JsonNode toJson(final Object value) throws IOException {
         return MAPPER.readTree(MAPPER.writeValueAsString(value));
+    }
+
+    static JsonNode serializedPublicValue(final SourceRecord record) throws IOException {
+        final JsonConverter converter = new JsonConverter();
+        converter.configure(Map.of(
+                "schemas.enable", "false",
+                "decimal.format", "NUMERIC"), false);
+        return MAPPER.readTree(converter.fromConnectData(record.topic(), record.valueSchema(), record.value()));
     }
 
     private static Path fixtureRoot() {

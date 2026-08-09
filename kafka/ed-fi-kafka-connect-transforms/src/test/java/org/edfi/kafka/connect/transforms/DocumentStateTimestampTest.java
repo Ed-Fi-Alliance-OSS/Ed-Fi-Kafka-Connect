@@ -5,7 +5,6 @@
 
 package org.edfi.kafka.connect.transforms;
 
-import java.util.Map;
 import java.util.stream.Stream;
 
 import org.apache.kafka.connect.data.Schema;
@@ -41,8 +40,8 @@ class DocumentStateTimestampTest {
                 .configuredTransform(provider)
                 .apply(DocumentStateTestRecords.documentCacheRecord(provider, after));
 
-        final Map<String, Object> value = outputValue(result);
-        assertThat(value).containsEntry("lastModifiedAt", expectedTimestamp);
+        final Struct value = outputValue(result);
+        assertThat(value.getString("lastModifiedAt")).isEqualTo(expectedTimestamp);
     }
 
     @ParameterizedTest
@@ -126,9 +125,8 @@ class DocumentStateTimestampTest {
                 + "\",\"_lastModifiedDate\":\"" + lastModifiedAt + "\"}";
     }
 
-    @SuppressWarnings("unchecked")
-    private static Map<String, Object> outputValue(final SourceRecord result) {
-        return (Map<String, Object>) result.value();
+    private static Struct outputValue(final SourceRecord result) {
+        return (Struct) result.value();
     }
 
     private static void assertFailure(final Throwable thrown, final DocumentState.FailureReason expectedReason) {
