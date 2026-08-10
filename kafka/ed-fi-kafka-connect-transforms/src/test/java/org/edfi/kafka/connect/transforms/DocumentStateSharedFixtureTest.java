@@ -30,6 +30,13 @@ class DocumentStateSharedFixtureTest {
     private static final String DESCRIPTOR_CASE = "descriptor-school-type";
     private static final String EXTENSION_CASE = "extension-student-school-association";
     private static final String PROPERTY_ABSENCE_CASE = "school-address-property-absence";
+    private static final String FIXTURE_MANIFEST_FILE = "fixture.json";
+    private static final String FIXTURE_VERSION = "materialized-document-fixture-v1";
+    private static final String CACHE_ROW_FILE = "expected-cache-row.json";
+    private static final String PUBLIC_DOCUMENT_FILE = "expected-public-cdc-document.json";
+
+    @TempDir
+    private Path temp;
 
     @ParameterizedTest
     @MethodSource("representativeSharedFixtures")
@@ -101,7 +108,7 @@ class DocumentStateSharedFixtureTest {
     }
 
     @Test
-    void Given_Shared_Fixture_Root_Path_Does_Not_Exist_Should_Fail_Fast(@TempDir final Path temp) {
+    void Given_Shared_Fixture_Root_Path_Does_Not_Exist_Should_Fail_Fast() {
         final Path missingRoot = temp.resolve("missing");
 
         assertThatThrownBy(() -> DocumentStateSharedFixtures.load(missingRoot, ORDINARY_CASE))
@@ -111,16 +118,105 @@ class DocumentStateSharedFixtureTest {
     }
 
     @Test
-    void Given_Shared_Fixture_File_Does_Not_Exist_Should_Fail_Fast(@TempDir final Path temp)
+    void Given_Shared_Fixture_Manifest_Does_Not_Exist_Should_Fail_Fast() throws IOException {
+        createFixtureDirectory("case-with-missing-manifest");
+
+        assertThatThrownBy(() -> DocumentStateSharedFixtures.load(temp, "case-with-missing-manifest"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Required shared DMS fixture file is missing")
+                .hasMessageContaining(FIXTURE_MANIFEST_FILE);
+    }
+
+    @Test
+    void Given_Shared_Fixture_Manifest_Case_Name_Does_Not_Match_Should_Fail_Fast()
+            throws IOException {
+        final Path fixture = createFixtureDirectory("requested-case");
+        writeManifest(fixture, "other-case");
+
+        assertThatThrownBy(() -> DocumentStateSharedFixtures.load(temp, "requested-case"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("caseName")
+                .hasMessageContaining("requested-case")
+                .hasMessageContaining("other-case");
+    }
+
+    @Test
+    void Given_Shared_Fixture_Manifest_Path_Field_Is_Missing_Should_Fail_Fast()
+            throws IOException {
+        final Path fixture = createFixtureDirectory("case-with-missing-path");
+        Files.writeString(fixture.resolve(FIXTURE_MANIFEST_FILE), "{"
+                + "\"fixtureVersion\":" + jsonText(FIXTURE_VERSION) + ","
+                + "\"caseName\":\"case-with-missing-path\","
+                + "\"expectedPublicCdcDocumentPath\":" + jsonText(PUBLIC_DOCUMENT_FILE)
+                + "}");
+
+        assertThatThrownBy(() -> DocumentStateSharedFixtures.load(temp, "case-with-missing-path"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("expectedCacheRowPath");
+    }
+
+    @ParameterizedTest
+    @MethodSource("invalidManifestPathValues")
+    void Given_Shared_Fixture_Manifest_Path_Value_Is_Invalid_Should_Fail_Fast(
+            final String cacheRowPathValue,
+            final String expectedMessage) throws IOException {
+        final Path fixture = createFixtureDirectory("case-with-bad-path");
+        writeManifest(
+                fixture,
+                "case-with-bad-path",
+                cacheRowPathValue,
+                jsonText(PUBLIC_DOCUMENT_FILE));
+
+        assertThatThrownBy(() -> DocumentStateSharedFixtures.load(temp, "case-with-bad-path"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("expectedCacheRowPath")
+                .hasMessageContaining(expectedMessage);
+    }
+
+    @Test
+    void Given_Shared_Fixture_Manifest_Path_Value_Is_Absolute_Should_Fail_Fast()
+            throws IOException {
+        final Path fixture = createFixtureDirectory("case-with-absolute-path");
+        writeManifest(
+                fixture,
+                "case-with-absolute-path",
+                jsonText(temp.resolve("outside.json").toString()),
+                jsonText(PUBLIC_DOCUMENT_FILE));
+
+        assertThatThrownBy(() -> DocumentStateSharedFixtures.load(temp, "case-with-absolute-path"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("expectedCacheRowPath")
+                .hasMessageContaining("relative");
+    }
+
+    @Test
+    void Given_Shared_Fixture_Referenced_File_Does_Not_Exist_Should_Fail_Fast()
             throws IOException {
         final Path fixture = temp.resolve("case-with-missing-file");
         Files.createDirectories(fixture);
-        Files.writeString(fixture.resolve("expected-cache-row.json"), "{}");
+        writeManifest(fixture, "case-with-missing-file");
+        Files.writeString(fixture.resolve(CACHE_ROW_FILE), validCacheRow());
 
         assertThatThrownBy(() -> DocumentStateSharedFixtures.load(temp, "case-with-missing-file"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Required shared DMS fixture file is missing")
-                .hasMessageContaining("expected-public-cdc-document.json");
+                .hasMessageContaining(PUBLIC_DOCUMENT_FILE);
+    }
+
+    @ParameterizedTest
+    @MethodSource("invalidRequiredJsonNodeTypes")
+    void Given_Shared_Fixture_Required_Json_Node_Type_Is_Wrong_Should_Fail_Fast(
+            final String cacheRowJson,
+            final String publicDocumentJson,
+            final String expectedMessage) throws IOException {
+        final Path fixture = createFixtureDirectory("case-with-wrong-json-type");
+        writeManifest(fixture, "case-with-wrong-json-type");
+        Files.writeString(fixture.resolve(CACHE_ROW_FILE), cacheRowJson);
+        Files.writeString(fixture.resolve(PUBLIC_DOCUMENT_FILE), publicDocumentJson);
+
+        assertThatThrownBy(() -> DocumentStateSharedFixtures.load(temp, "case-with-wrong-json-type"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining(expectedMessage);
     }
 
     private static Stream<Object[]> representativeSharedFixtures() {
@@ -144,6 +240,42 @@ class DocumentStateSharedFixtureTest {
 
     private static Stream<String> providers() {
         return Stream.of(DocumentState.POSTGRESQL_PROVIDER, DocumentState.SQLSERVER_PROVIDER);
+    }
+
+    private static Stream<Object[]> invalidManifestPathValues() {
+        return Stream.of(
+                new Object[] {"null", "non-blank text field"},
+                new Object[] {jsonText(""), "non-blank text field"},
+                new Object[] {jsonText("../" + CACHE_ROW_FILE), "relative"});
+    }
+
+    private static Stream<Object[]> invalidRequiredJsonNodeTypes() {
+        return Stream.of(
+                new Object[] {
+                    cacheRowJson(jsonText("Ed-Fi"), jsonText("222"), documentJsonEntry(validDocumentJson())),
+                    validPublicDocument(),
+                    "contentVersion"
+                },
+                new Object[] {
+                    cacheRowJson("123", "222", documentJsonEntry(validDocumentJson())),
+                    validPublicDocument(),
+                    "projectName"
+                },
+                new Object[] {
+                    cacheRowJson(jsonText("Ed-Fi"), "222", ""),
+                    validPublicDocument(),
+                    "documentJson"
+                },
+                new Object[] {
+                    cacheRowJson(jsonText("Ed-Fi"), "222", documentJsonEntry(jsonText("{}"))),
+                    validPublicDocument(),
+                    "documentJson"
+                },
+                new Object[] {
+                    validCacheRow(),
+                    "{\"document\":\"not-object\"}",
+                    "document"
+                });
     }
 
     private static void assertField(
@@ -204,5 +336,80 @@ class DocumentStateSharedFixtureTest {
             return DocumentStateTestRecords.POSTGRESQL_TIMESTAMP_SCHEMA;
         }
         return DocumentStateTestRecords.SQLSERVER_TIMESTAMP_SCHEMA;
+    }
+
+    private Path createFixtureDirectory(final String caseName) throws IOException {
+        final Path fixture = temp.resolve(caseName);
+        Files.createDirectories(fixture);
+        return fixture;
+    }
+
+    private static void writeManifest(
+            final Path fixture,
+            final String caseName) throws IOException {
+        writeManifest(fixture, caseName, jsonText(CACHE_ROW_FILE), jsonText(PUBLIC_DOCUMENT_FILE));
+    }
+
+    private static void writeManifest(
+            final Path fixture,
+            final String caseName,
+            final String cacheRowPathValue,
+            final String publicDocumentPathValue) throws IOException {
+        Files.writeString(fixture.resolve(FIXTURE_MANIFEST_FILE), "{"
+                + "\"fixtureVersion\":" + jsonText(FIXTURE_VERSION) + ","
+                + "\"caseName\":" + jsonText(caseName) + ","
+                + "\"expectedCacheRowPath\":" + cacheRowPathValue + ","
+                + "\"expectedPublicCdcDocumentPath\":" + publicDocumentPathValue
+                + "}");
+    }
+
+    private static String validCacheRow() {
+        return cacheRowJson(
+                jsonText("Ed-Fi"),
+                "222",
+                documentJsonEntry(validDocumentJson()));
+    }
+
+    private static String cacheRowJson(
+            final String projectNameValue,
+            final String contentVersionValue,
+            final String documentJsonEntry) {
+        return "{"
+                + "\"documentUuid\":" + jsonText(DocumentStateTestRecords.DOCUMENT_UUID) + ","
+                + "\"projectName\":" + projectNameValue + ","
+                + "\"resourceName\":\"StudentSchoolAssociation\","
+                + "\"resourceVersion\":\"1.0\","
+                + "\"contentVersion\":" + contentVersionValue + ","
+                + "\"lastModifiedAt\":\"2026-07-30T14:15:16.123456Z\","
+                + "\"streamEtag\":\"222-01234567.j._.l.i\""
+                + documentJsonEntry
+                + "}";
+    }
+
+    private static String documentJsonEntry(final String documentJsonValue) {
+        return ",\"documentJson\":" + documentJsonValue;
+    }
+
+    private static String validDocumentJson() {
+        return "{"
+                + "\"id\":" + jsonText(DocumentStateTestRecords.DOCUMENT_UUID) + ","
+                + "\"_lastModifiedDate\":\"2026-07-30T14:15:16Z\","
+                + "\"schoolId\":255901"
+                + "}";
+    }
+
+    private static String validPublicDocument() {
+        return "{"
+                + "\"document\":{"
+                + "\"id\":" + jsonText(DocumentStateTestRecords.DOCUMENT_UUID) + ","
+                + "\"_lastModifiedDate\":\"2026-07-30T14:15:16Z\","
+                + "\"schoolId\":255901,"
+                + "\"_etag\":\"222-01234567.j._.l.i\""
+                + "}"
+                + "}";
+    }
+
+    private static String jsonText(final String value) {
+        return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
     }
 }

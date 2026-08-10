@@ -32,8 +32,15 @@ final class DocumentStateSharedFixtures {
             .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
             .nodeFactory(JsonNodeFactory.withExactBigDecimals(true))
             .build();
-    private static final String CACHE_ROW_FILE = "expected-cache-row.json";
-    private static final String PUBLIC_DOCUMENT_FILE = "expected-public-cdc-document.json";
+    private static final String FIXTURE_MANIFEST_FILE = "fixture.json";
+    private static final String FIXTURE_VERSION = "materialized-document-fixture-v1";
+    private static final String FIXTURE_VERSION_FIELD = "fixtureVersion";
+    private static final String CASE_NAME_FIELD = "caseName";
+    private static final String EXPECTED_CACHE_ROW_PATH_FIELD = "expectedCacheRowPath";
+    private static final String EXPECTED_PUBLIC_CDC_DOCUMENT_PATH_FIELD =
+            "expectedPublicCdcDocumentPath";
+    private static final String DOCUMENT_FIELD = "document";
+    private static final String LAST_MODIFIED_DATE_FIELD = "_lastModifiedDate";
 
     private DocumentStateSharedFixtures() {
     }
@@ -45,14 +52,23 @@ final class DocumentStateSharedFixtures {
     static SharedFixture load(final Path fixtureRoot, final String caseName) throws IOException {
         requireDirectory(fixtureRoot, "shared DMS fixture root");
         final Path fixtureDirectory = fixtureRoot.resolve(caseName);
-        final JsonNode cacheRow = readRequiredJson(fixtureDirectory.resolve(CACHE_ROW_FILE));
-        final JsonNode publicDocument = readRequiredJson(fixtureDirectory.resolve(PUBLIC_DOCUMENT_FILE));
-        final JsonNode expectedDocument = publicDocument.get("document");
-        if (expectedDocument == null || !expectedDocument.isObject()) {
-            throw new IllegalStateException("Shared fixture file must contain document object: "
-                    + fixtureDirectory.resolve(PUBLIC_DOCUMENT_FILE));
-        }
-        return new SharedFixture(caseName, cacheRow, expectedDocument);
+        requireDirectory(fixtureDirectory, "shared DMS fixture case");
+        final Path manifestPath = fixtureDirectory.resolve(FIXTURE_MANIFEST_FILE);
+        final JsonNode manifest = readRequiredObject(manifestPath, "shared DMS fixture manifest");
+        validateManifest(manifest, manifestPath, caseName);
+        final Path cacheRowPath =
+                resolveManifestPath(fixtureDirectory, manifestPath, manifest, EXPECTED_CACHE_ROW_PATH_FIELD);
+        final Path publicDocumentPath = resolveManifestPath(
+                fixtureDirectory, manifestPath, manifest, EXPECTED_PUBLIC_CDC_DOCUMENT_PATH_FIELD);
+        final JsonNode cacheRow = readRequiredObject(cacheRowPath, "shared DMS expected cache row");
+        final JsonNode publicDocument =
+                readRequiredObject(publicDocumentPath, "shared DMS expected public CDC document");
+        final JsonNode expectedDocument = requiredObject(publicDocument, DOCUMENT_FIELD, publicDocumentPath);
+        return new SharedFixture(
+                caseName,
+                new CacheRowData(cacheRow, cacheRowPath),
+                expectedDocument,
+                requiredText(expectedDocument, LAST_MODIFIED_DATE_FIELD, publicDocumentPath));
     }
 
     static JsonNode toJson(final Object value) throws IOException {
@@ -94,26 +110,114 @@ final class DocumentStateSharedFixtures {
         return MAPPER.readTree(path.toFile());
     }
 
+    private static JsonNode readRequiredObject(
+            final Path path,
+            final String description) throws IOException {
+        final JsonNode node = readRequiredJson(path);
+        if (node == null || !node.isObject()) {
+            throw new IllegalStateException(description + " must be a JSON object: " + path);
+        }
+        return node;
+    }
+
     private static void requireDirectory(final Path path, final String description) {
         if (!Files.isDirectory(path)) {
             throw new IllegalStateException(description + " does not exist: " + path);
         }
     }
 
+    private static void validateManifest(
+            final JsonNode manifest,
+            final Path manifestPath,
+            final String caseName) {
+        final String fixtureVersion = requiredText(manifest, FIXTURE_VERSION_FIELD, manifestPath);
+        if (!FIXTURE_VERSION.equals(fixtureVersion)) {
+            throw new IllegalStateException("Shared fixture manifest fixtureVersion mismatch for "
+                    + manifestPath + ": expected " + FIXTURE_VERSION + " but found " + fixtureVersion);
+        }
+        final String manifestCaseName = requiredText(manifest, CASE_NAME_FIELD, manifestPath);
+        if (!caseName.equals(manifestCaseName)) {
+            throw new IllegalStateException("Shared fixture manifest caseName mismatch for "
+                    + manifestPath + ": expected " + caseName + " but found " + manifestCaseName);
+        }
+    }
+
+    private static Path resolveManifestPath(
+            final Path fixtureDirectory,
+            final Path manifestPath,
+            final JsonNode manifest,
+            final String fieldName) {
+        final String relativePath = requiredText(manifest, fieldName, manifestPath);
+        final Path path = Path.of(relativePath);
+        if (path.isAbsolute() || containsParentDirectory(path)) {
+            throw new IllegalStateException("Shared fixture manifest path must stay relative to "
+                    + fixtureDirectory + ": " + fieldName + "=" + relativePath);
+        }
+        return fixtureDirectory.resolve(path).normalize();
+    }
+
+    private static boolean containsParentDirectory(final Path path) {
+        for (final Path name : path) {
+            if ("..".equals(name.toString())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String requiredText(
+            final JsonNode object,
+            final String fieldName,
+            final Path sourcePath) {
+        final JsonNode value = object.get(fieldName);
+        if (value == null || value.isNull() || !value.isTextual() || value.textValue().isBlank()) {
+            throw new IllegalStateException("Shared fixture file must contain non-blank text field "
+                    + fieldName + ": " + sourcePath);
+        }
+        return value.textValue();
+    }
+
+    private static long requiredLong(
+            final JsonNode object,
+            final String fieldName,
+            final Path sourcePath) {
+        final JsonNode value = object.get(fieldName);
+        if (value == null || value.isNull() || !value.isIntegralNumber() || !value.canConvertToLong()) {
+            throw new IllegalStateException("Shared fixture file must contain signed 64-bit integer field "
+                    + fieldName + ": " + sourcePath);
+        }
+        return value.longValue();
+    }
+
+    private static JsonNode requiredObject(
+            final JsonNode object,
+            final String fieldName,
+            final Path sourcePath) {
+        final JsonNode value = object.get(fieldName);
+        if (value == null || !value.isObject()) {
+            throw new IllegalStateException("Shared fixture file must contain object field "
+                    + fieldName + ": " + sourcePath);
+        }
+        return value;
+    }
+
     static final class SharedFixture {
         private final String caseName;
-        private final JsonNode cacheRow;
+        private final CacheRowData cacheRow;
         private final JsonNode expectedDocument;
+        private final String expectedLastModifiedAt;
         private final JsonNode expectedEnvelope;
 
         private SharedFixture(
                 final String caseName,
-                final JsonNode cacheRow,
-                final JsonNode expectedDocument) {
+                final CacheRowData cacheRow,
+                final JsonNode expectedDocument,
+                final String expectedLastModifiedAt) {
             this.caseName = caseName;
             this.cacheRow = cacheRow;
             this.expectedDocument = expectedDocument;
-            this.expectedEnvelope = expectedEnvelope(cacheRow, expectedDocument);
+            this.expectedLastModifiedAt = expectedLastModifiedAt;
+            this.expectedEnvelope = createExpectedEnvelope();
         }
 
         String caseName() {
@@ -121,11 +225,11 @@ final class DocumentStateSharedFixtures {
         }
 
         String documentUuid() {
-            return cacheRow.get("documentUuid").asText();
+            return cacheRow.documentUuid;
         }
 
         JsonNode cacheRow() {
-            return cacheRow;
+            return cacheRow.json;
         }
 
         JsonNode expectedDocument() {
@@ -142,21 +246,21 @@ final class DocumentStateSharedFixtures {
                     .field(DocumentStateTestRecords.DOCUMENT_UUID_FIELD,
                             DocumentStateTestRecords.pinnedUuidSchema(provider), documentUuid())
                     .field(DocumentStateTestRecords.PROJECT_NAME_FIELD, Schema.STRING_SCHEMA,
-                            cacheRow.get("projectName").asText())
+                            cacheRow.projectName)
                     .field(DocumentStateTestRecords.RESOURCE_NAME_FIELD, Schema.STRING_SCHEMA,
-                            cacheRow.get("resourceName").asText())
+                            cacheRow.resourceName)
                     .field(DocumentStateTestRecords.RESOURCE_VERSION_FIELD, Schema.STRING_SCHEMA,
-                            cacheRow.get("resourceVersion").asText())
+                            cacheRow.resourceVersion)
                     .field(DocumentStateTestRecords.CONTENT_VERSION_FIELD, Schema.INT64_SCHEMA,
-                            cacheRow.get("contentVersion").asLong())
+                            cacheRow.contentVersion)
                     .field(DocumentStateTestRecords.STREAM_ETAG_FIELD, Schema.STRING_SCHEMA,
-                            cacheRow.get("streamEtag").asText())
+                            cacheRow.streamEtag)
                     .field(DocumentStateTestRecords.LAST_MODIFIED_AT_FIELD,
                             DocumentStateTestRecords.lastModifiedAtSchema(provider),
-                            cacheRow.get("lastModifiedAt").asText())
+                            cacheRow.lastModifiedAt)
                     .field(DocumentStateTestRecords.DOCUMENT_JSON_FIELD,
                             DocumentStateTestRecords.documentJsonSchema(provider),
-                            MAPPER.writeValueAsString(cacheRow.get("documentJson")))
+                            MAPPER.writeValueAsString(cacheRow.documentJson))
                     .build();
         }
 
@@ -165,19 +269,41 @@ final class DocumentStateSharedFixtures {
                     provider, documentUuid().toUpperCase(Locale.ROOT), cacheRowStruct(provider));
         }
 
-        private static JsonNode expectedEnvelope(
-                final JsonNode cacheRow,
-                final JsonNode expectedDocument) {
+        private JsonNode createExpectedEnvelope() {
             final ObjectNode expected = MAPPER.createObjectNode();
             expected.put("contractVersion", 1);
-            expected.put("documentUuid", cacheRow.get("documentUuid").asText());
-            expected.put("projectName", cacheRow.get("projectName").asText());
-            expected.put("resourceName", cacheRow.get("resourceName").asText());
-            expected.put("resourceVersion", cacheRow.get("resourceVersion").asText());
-            expected.put("contentVersion", cacheRow.get("contentVersion").asLong());
-            expected.put("lastModifiedAt", expectedDocument.get("_lastModifiedDate").asText());
+            expected.put("documentUuid", cacheRow.documentUuid);
+            expected.put("projectName", cacheRow.projectName);
+            expected.put("resourceName", cacheRow.resourceName);
+            expected.put("resourceVersion", cacheRow.resourceVersion);
+            expected.put("contentVersion", cacheRow.contentVersion);
+            expected.put("lastModifiedAt", expectedLastModifiedAt);
             expected.set("document", expectedDocument);
             return expected;
+        }
+    }
+
+    private static final class CacheRowData {
+        private final JsonNode json;
+        private final String documentUuid;
+        private final String projectName;
+        private final String resourceName;
+        private final String resourceVersion;
+        private final long contentVersion;
+        private final String streamEtag;
+        private final String lastModifiedAt;
+        private final JsonNode documentJson;
+
+        private CacheRowData(final JsonNode json, final Path path) {
+            this.json = json;
+            this.documentUuid = requiredText(json, "documentUuid", path);
+            this.projectName = requiredText(json, "projectName", path);
+            this.resourceName = requiredText(json, "resourceName", path);
+            this.resourceVersion = requiredText(json, "resourceVersion", path);
+            this.contentVersion = requiredLong(json, "contentVersion", path);
+            this.streamEtag = requiredText(json, "streamEtag", path);
+            this.lastModifiedAt = requiredText(json, "lastModifiedAt", path);
+            this.documentJson = requiredObject(json, "documentJson", path);
         }
     }
 }
