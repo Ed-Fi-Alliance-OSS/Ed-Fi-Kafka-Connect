@@ -175,6 +175,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: Ed-Fi-Alliance-OSS/Data-Management-Service
+          ref: 2dece6c0c02b7ef9bd4af88185eae1e2a2ef95bc
           path: dms
 
       - name: Run the ExpandJson execution smoke inside the Kafka Connect 4.3 image
@@ -210,6 +211,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: Ed-Fi-Alliance-OSS/Data-Management-Service
+          ref: 2dece6c0c02b7ef9bd4af88185eae1e2a2ef95bc
           path: dms
 
       - name: Dependency Review ("Dependabot on PR")
