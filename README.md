@@ -88,24 +88,29 @@ transforms.documentState.target.topic=<instance document topic>
 transforms.documentState.progress.topic=<instance document topic>.cdc-progress
 ```
 
-Public upserts emitted by `DocumentState` are Kafka Connect schema-backed values: the record
-has a non-null `STRUCT` value schema and a matching `Struct` value. The public Kafka value
-contract is still the serialized UTF-8 JSON bytes produced by Kafka Connect's
-`JsonConverter`, not that private in-memory shape. Use these converter settings for the
-relational document-state topic:
+Public upserts emitted by `DocumentState` are named logical-byte values: the record has a
+required `BYTES` value schema named `org.edfi.kafka.connect.data.DocumentStateJson` at
+version `1` and a matching `byte[]` containing the complete final public JSON object. Use
+these converter settings for the relational document-state topic:
 
 ```properties
-value.converter=org.apache.kafka.connect.json.JsonConverter
+value.converter=org.edfi.kafka.connect.converters.DocumentStateJsonConverter
 value.converter.schemas.enable=false
 value.converter.decimal.format=NUMERIC
 ```
 
-With `schemas.enable=false`, the serialized Kafka bytes are a plain JSON object with no
-Kafka Connect `schema` or `payload` wrapper: schema-less public JSON bytes. With
-`decimal.format=NUMERIC`, exact `DocumentJson` decimal values represented through Connect
-`Decimal` logical fields publish as unquoted JSON numbers instead of Base64 bytes. Do not
-replace this with `Double`/`Float`, string conversion, Avro, Protobuf, Schema Registry, or a
-custom public converter for the v1 document-state contract.
+`DocumentStateJsonConverter` passes only that exact public upsert schema/value handshake
+through as a defensive byte copy, so the Kafka bytes are a plain JSON object with no
+Kafka Connect `schema` or `payload` wrapper, no Base64 encoding, and no second JSON
+serialization pass. Public tombstones remain record-level null values. Every other non-null
+record, including internal progress records, is delegated to Kafka Connect 4.3
+`JsonConverter` with `schemas.enable=false` and `decimal.format=NUMERIC`.
+
+The transform builds the final JSON tree itself so collection objects preserve absent
+properties instead of gaining synthetic nulls, and valid `DocumentJson` integer and decimal
+values publish as exact JSON numbers. Do not replace this with `Double`/`Float`, string
+conversion, generic `JsonConverter` public upserts, Avro, Protobuf, or Schema Registry for
+the v1 document-state contract.
 
 ## Running transformations
 
