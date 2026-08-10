@@ -43,17 +43,6 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
     private static final String STREAM_ETAG_FIELD = "StreamEtag";
     private static final String LAST_MODIFIED_AT_FIELD = "LastModifiedAt";
     private static final String DOCUMENT_JSON_FIELD = "DocumentJson";
-    private static final String PUBLIC_CONTRACT_VERSION_FIELD = "contractVersion";
-    private static final String PUBLIC_DOCUMENT_UUID_FIELD = "documentUuid";
-    private static final String PUBLIC_PROJECT_NAME_FIELD = "projectName";
-    private static final String PUBLIC_RESOURCE_NAME_FIELD = "resourceName";
-    private static final String PUBLIC_RESOURCE_VERSION_FIELD = "resourceVersion";
-    private static final String PUBLIC_CONTENT_VERSION_FIELD = "contentVersion";
-    private static final String PUBLIC_LAST_MODIFIED_AT_FIELD = "lastModifiedAt";
-    private static final String PUBLIC_DOCUMENT_FIELD = "document";
-    private static final String PUBLIC_DOCUMENT_ID_FIELD = "id";
-    private static final String PUBLIC_DOCUMENT_ETAG_FIELD = "_etag";
-    private static final String PUBLIC_DOCUMENT_LAST_MODIFIED_DATE_FIELD = "_lastModifiedDate";
     private static final String RELATIONAL_SCHEMA = "dms";
     private static final String DOCUMENT_CACHE_TABLE = "DocumentCache";
     private static final String DOCUMENT_TABLE = "Document";
@@ -67,7 +56,6 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
     private static final String SQLSERVER_TIMESTAMP_SCHEMA_NAME = "io.debezium.time.IsoTimestamp";
     private static final String SQLSERVER_UNAVAILABLE_VALUE = "__debezium_unavailable_value";
     private static final int MAX_METADATA_VALUE_LENGTH = 128;
-    private static final int CONTRACT_VERSION = 1;
 
     public static final ConfigDef CONFIG_DEF = new ConfigDef()
             .define(PROVIDER_CONFIG, ConfigDef.Type.STRING, ConfigDef.NO_DEFAULT_VALUE,
@@ -145,22 +133,16 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
     }
 
     ValidatedDocumentKey validatePublicDocumentKey(final R record, final ClassifiedRecord classifiedRecord) {
-        final ValidatedDocumentKey documentKey = settings.sourceAdapter().documentKey(record, classifiedRecord);
-        if (classifiedRecord.outputKind() == OutputKind.PUBLIC_UPSERT) {
-            final String rowDocumentUuid = settings.sourceAdapter().cacheRowDocumentUuid(record, classifiedRecord);
-            if (!documentKey.value().equals(rowDocumentUuid)) {
-                throw classifiedFailure(FailureReason.DOCUMENT_UUID_MISMATCH, record, classifiedRecord);
-            }
-        }
-        return documentKey;
+        return settings.sourceAdapter().documentKey(record, classifiedRecord);
     }
 
     private R publicUpsert(
             final R record,
             final ClassifiedRecord classifiedRecord,
             final ValidatedDocumentKey documentKey) {
+        final var row = settings.sourceAdapter().cacheRow(record, classifiedRecord, documentKey);
         final DocumentStateJson.ByteBackedValue value =
-                settings.sourceAdapter().publicUpsertValue(record, classifiedRecord, documentKey);
+                DocumentStateJson.publicUpsertValue(row, documentKey, record, classifiedRecord);
         return DocumentStateJson.publicUpsertRecord(record, settings.targetTopic(), documentKey, value);
     }
 
@@ -379,6 +361,16 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
             return transformationFailure(reason, record, sourceMetadata, operation);
         }
         return transformationFailure(reason, null, record, null, operation);
+    }
+
+    private static void validateRetainedRowDocumentUuid(
+            final ValidatedDocumentKey documentKey,
+            final String rowDocumentUuid,
+            final ConnectRecord<?> record,
+            final ClassifiedRecord classifiedRecord) {
+        if (!documentKey.value().equals(rowDocumentUuid)) {
+            throw classifiedFailure(FailureReason.DOCUMENT_UUID_MISMATCH, record, classifiedRecord);
+        }
     }
 
     private static Map<String, String> failureMetadata(final Provider provider, final ConnectRecord<?> record) {
@@ -646,7 +638,6 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
     }
 
     static final class RetainedCacheRow {
-        private final String documentUuid;
         private final String projectName;
         private final String resourceName;
         private final String resourceVersion;
@@ -656,7 +647,6 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
         private final String documentJson;
 
         RetainedCacheRow(
-                final String documentUuid,
                 final String projectName,
                 final String resourceName,
                 final String resourceVersion,
@@ -664,7 +654,6 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
                 final String streamEtag,
                 final String lastModifiedAt,
                 final String documentJson) {
-            this.documentUuid = documentUuid;
             this.projectName = projectName;
             this.resourceName = resourceName;
             this.resourceVersion = resourceVersion;
@@ -672,10 +661,6 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
             this.streamEtag = streamEtag;
             this.lastModifiedAt = lastModifiedAt;
             this.documentJson = documentJson;
-        }
-
-        String documentUuid() {
-            return documentUuid;
         }
 
         String projectName() {
@@ -812,18 +797,15 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
             return new ValidatedDocumentKey(documentUuid);
         }
 
-        String cacheRowDocumentUuid(
-                final ConnectRecord<?> record, final ClassifiedRecord classifiedRecord) {
-            return documentUuid(retainedAfterStruct(record, classifiedRecord), record, classifiedRecord,
-                    FailureReason.UNSUPPORTED_DOCUMENT_UUID_SHAPE);
-        }
-
-        DocumentStateJson.ByteBackedValue publicUpsertValue(
+        RetainedCacheRow cacheRow(
                 final ConnectRecord<?> record,
                 final ClassifiedRecord classifiedRecord,
                 final ValidatedDocumentKey documentKey) {
-            final RetainedCacheRow row = cacheRow(record, classifiedRecord);
-            return DocumentStateJson.publicUpsertValue(row, documentKey, record, classifiedRecord);
+            final Struct row = retainedAfterStruct(record, classifiedRecord);
+            final String documentUuid = documentUuid(
+                    row, record, classifiedRecord, FailureReason.UNSUPPORTED_DOCUMENT_UUID_SHAPE);
+            validateRetainedRowDocumentUuid(documentKey, documentUuid, record, classifiedRecord);
+            return cacheRow(row, record, classifiedRecord);
         }
 
         void validateDeleteBeforeDocumentUuid(
@@ -902,11 +884,10 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
         }
 
         private RetainedCacheRow cacheRow(
-                final ConnectRecord<?> record, final ClassifiedRecord classifiedRecord) {
-            final Struct row = retainedAfterStruct(record, classifiedRecord);
+                final Struct row,
+                final ConnectRecord<?> record,
+                final ClassifiedRecord classifiedRecord) {
             return new RetainedCacheRow(
-                    documentUuid(row, record, classifiedRecord,
-                            FailureReason.UNSUPPORTED_DOCUMENT_UUID_SHAPE),
                     requiredString(row, PROJECT_NAME_FIELD, FieldKind.PLAIN_STRING, record, classifiedRecord),
                     requiredString(row, RESOURCE_NAME_FIELD, FieldKind.PLAIN_STRING, record, classifiedRecord),
                     requiredString(row, RESOURCE_VERSION_FIELD, FieldKind.PLAIN_STRING, record, classifiedRecord),

@@ -167,9 +167,6 @@ final class DocumentStateJson {
             final DocumentState.RetainedCacheRow row,
             final ConnectRecord<?> record,
             final DocumentState.ClassifiedRecord classifiedRecord) {
-        if (!documentKey.value().equals(row.documentUuid())) {
-            throw failure(DocumentState.FailureReason.DOCUMENT_UUID_MISMATCH, record, classifiedRecord);
-        }
         requireTextField(
                 documentNode, PUBLIC_DOCUMENT_ID_FIELD, documentKey.value(), record, classifiedRecord);
         requireTextField(
