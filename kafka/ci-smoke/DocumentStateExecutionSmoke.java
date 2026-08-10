@@ -8,6 +8,7 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.Map;
 
 import org.apache.kafka.connect.data.Schema;
@@ -36,13 +37,27 @@ public final class DocumentStateExecutionSmoke {
     private static final String TARGET_TOPIC = "edfi.documents";
     private static final String PROGRESS_TOPIC = "edfi.documents.cdc-progress";
     private static final String DOCUMENT_UUID = "aaaaaaaa-bbbb-cccc-dddd-000000000101";
+    private static final String TOPIC_PREFIX = "dms";
+    private static final String TOPIC_DELIMITER = ".";
+    private static final String TOPIC_NAMING_STRATEGY = "io.debezium.schema.SchemaTopicNamingStrategy";
+    private static final String TOPIC_HEARTBEAT_PREFIX = "__debezium-heartbeat";
+    private static final String TOPIC_HEARTBEAT_NAME = "";
     private static final String POSTGRESQL_SOURCE_SCHEMA = "io.debezium.connector.postgresql.Source";
     private static final String POSTGRESQL_UUID_SCHEMA = "io.debezium.data.Uuid";
     private static final String POSTGRESQL_JSON_SCHEMA = "io.debezium.data.Json";
     private static final String POSTGRESQL_TIMESTAMP_SCHEMA = "io.debezium.time.ZonedTimestamp";
+    private static final String TOPIC_DELIMITER_CONFIG = "topic.delimiter";
+    private static final String TOPIC_NAMING_STRATEGY_CONFIG = "topic.naming.strategy";
+    private static final String TOPIC_HEARTBEAT_PREFIX_CONFIG = "topic.heartbeat.prefix";
+    private static final String TOPIC_HEARTBEAT_NAME_CONFIG = "topic.heartbeat.name";
     private static final String VALUE_CONVERTER_CONFIG = "value.converter";
     private static final String VALUE_CONVERTER_SCHEMAS_CONFIG = "value.converter.schemas.enable";
     private static final String VALUE_CONVERTER_DECIMAL_CONFIG = "value.converter.decimal.format";
+    private static final Map<String, String> CONNECTOR_TOPIC_CONFIG = Map.of(
+            TOPIC_DELIMITER_CONFIG, TOPIC_DELIMITER,
+            TOPIC_NAMING_STRATEGY_CONFIG, TOPIC_NAMING_STRATEGY,
+            TOPIC_HEARTBEAT_PREFIX_CONFIG, TOPIC_HEARTBEAT_PREFIX,
+            TOPIC_HEARTBEAT_NAME_CONFIG, TOPIC_HEARTBEAT_NAME);
     private static final Map<String, String> CONNECTOR_VALUE_CONVERTER_CONFIG = Map.of(
             VALUE_CONVERTER_CONFIG, DocumentStateJsonConverter.class.getName(),
             VALUE_CONVERTER_SCHEMAS_CONFIG, "false",
@@ -64,6 +79,7 @@ public final class DocumentStateExecutionSmoke {
         }
 
         final SharedCacheFixture sharedFixture = sharedCacheFixture(Path.of(args[0]));
+        smokeConnectorTopicSettingsValidation();
         smokePublicUpsert(sharedFixture);
         smokePublicUpsertDecimalSerialization();
         smokePublicTombstone();
@@ -71,6 +87,31 @@ public final class DocumentStateExecutionSmoke {
         smokeMalformedRetainedRecordFailure();
         System.out.println("OK: DocumentState and DocumentStateJsonConverter executed representative records "
                 + "on the image runtime classpath.");
+    }
+
+    private static void smokeConnectorTopicSettingsValidation() {
+        validateRenderedConnectorTopicSettings(CONNECTOR_TOPIC_CONFIG);
+        validateLiveConnectorTopicSettings(CONNECTOR_TOPIC_CONFIG);
+        validateRenderedConnectorTopicSettings(withoutConnectorTopicSetting(TOPIC_HEARTBEAT_NAME_CONFIG));
+        validateLiveConnectorTopicSettings(withoutConnectorTopicSetting(TOPIC_HEARTBEAT_NAME_CONFIG));
+
+        expectConnectorTopicSettingFailure(
+                withoutConnectorTopicSetting(TOPIC_DELIMITER_CONFIG), TOPIC_DELIMITER_CONFIG);
+        expectConnectorTopicSettingFailure(
+                withConnectorTopicSetting(TOPIC_DELIMITER_CONFIG, "_"), TOPIC_DELIMITER_CONFIG);
+        expectConnectorTopicSettingFailure(
+                withoutConnectorTopicSetting(TOPIC_NAMING_STRATEGY_CONFIG), TOPIC_NAMING_STRATEGY_CONFIG);
+        expectConnectorTopicSettingFailure(
+                withConnectorTopicSetting(
+                        TOPIC_NAMING_STRATEGY_CONFIG,
+                        "io.debezium.schema.DefaultTopicNamingStrategy"),
+                TOPIC_NAMING_STRATEGY_CONFIG);
+        expectConnectorTopicSettingFailure(
+                withoutConnectorTopicSetting(TOPIC_HEARTBEAT_PREFIX_CONFIG), TOPIC_HEARTBEAT_PREFIX_CONFIG);
+        expectConnectorTopicSettingFailure(
+                withConnectorTopicSetting(TOPIC_HEARTBEAT_PREFIX_CONFIG, "heartbeat"), TOPIC_HEARTBEAT_PREFIX_CONFIG);
+        expectConnectorTopicSettingFailure(
+                withConnectorTopicSetting(TOPIC_HEARTBEAT_NAME_CONFIG, "heartbeat"), TOPIC_HEARTBEAT_NAME_CONFIG);
     }
 
     private static void smokePublicUpsert(final SharedCacheFixture sharedFixture) throws IOException {
@@ -184,13 +225,17 @@ public final class DocumentStateExecutionSmoke {
         final DocumentState<SourceRecord> transform = configuredTransform();
         try {
             final Headers headers = new ConnectHeaders().addString("source-header", "kept");
+            final String heartbeatTopic = nativeHeartbeatTopic(CONNECTOR_TOPIC_CONFIG);
             final SourceRecord record = new SourceRecord(
-                    sourcePartition(), sourceOffset(), "__debezium-heartbeat.dms", null,
+                    sourcePartition(), sourceOffset(), heartbeatTopic, null,
                     Schema.STRING_SCHEMA, "ignored-source-key", Schema.STRING_SCHEMA, "heartbeat", 321L,
                     headers);
 
             final SourceRecord out = transform.apply(record);
 
+            expect(heartbeatTopic.equals(TOPIC_HEARTBEAT_PREFIX + TOPIC_DELIMITER
+                            + record.sourcePartition().get("server")),
+                    "native heartbeat topic equals prefix plus source server");
             expect(PROGRESS_TOPIC.equals(out.topic()), "progress topic = " + out.topic());
             expect(out.keySchema() == Schema.STRING_SCHEMA, "progress key schema");
             expect("cdc-progress".equals(out.key()), "progress key = " + out.key());
@@ -285,7 +330,8 @@ public final class DocumentStateExecutionSmoke {
                 .put(rowField, row);
 
         return new SourceRecord(
-                sourcePartition(), sourceOffset(), "server.dms." + sourceTable, null,
+                sourcePartition(), sourceOffset(), TOPIC_PREFIX + TOPIC_DELIMITER + "dms" + TOPIC_DELIMITER
+                        + sourceTable, null,
                 key.schema(), key, valueSchema, value, timestamp, headers);
     }
 
@@ -367,11 +413,89 @@ public final class DocumentStateExecutionSmoke {
     }
 
     private static Map<String, String> sourcePartition() {
-        return Map.of("server", "dms");
+        return Map.of("server", TOPIC_PREFIX);
     }
 
     private static Map<String, Long> sourceOffset() {
         return Map.of("position", 1L);
+    }
+
+    private static Map<String, String> withoutConnectorTopicSetting(final String name) {
+        final Map<String, String> settings = new HashMap<>(CONNECTOR_TOPIC_CONFIG);
+        settings.remove(name);
+        return settings;
+    }
+
+    private static Map<String, String> withConnectorTopicSetting(final String name, final String value) {
+        final Map<String, String> settings = new HashMap<>(CONNECTOR_TOPIC_CONFIG);
+        settings.put(name, value);
+        return settings;
+    }
+
+    private static void validateRenderedConnectorTopicSettings(final Map<String, String> settings) {
+        validateConnectorTopicSettings(settings, "rendered");
+    }
+
+    private static void validateLiveConnectorTopicSettings(final Map<String, String> settings) {
+        validateConnectorTopicSettings(settings, "live");
+    }
+
+    private static void validateConnectorTopicSettings(final Map<String, String> settings, final String phase) {
+        requireExactConnectorTopicSetting(settings, TOPIC_DELIMITER_CONFIG, TOPIC_DELIMITER, phase);
+        requireExactConnectorTopicSetting(settings, TOPIC_NAMING_STRATEGY_CONFIG, TOPIC_NAMING_STRATEGY, phase);
+        requireExactConnectorTopicSetting(settings, TOPIC_HEARTBEAT_PREFIX_CONFIG, TOPIC_HEARTBEAT_PREFIX, phase);
+
+        final String heartbeatName = settings.get(TOPIC_HEARTBEAT_NAME_CONFIG);
+        if (heartbeatName != null && !heartbeatName.isEmpty()) {
+            fail(phase + " connector topic setting " + TOPIC_HEARTBEAT_NAME_CONFIG + " must be unset or empty");
+        }
+    }
+
+    private static void requireExactConnectorTopicSetting(
+            final Map<String, String> settings,
+            final String name,
+            final String expected,
+            final String phase) {
+        final String actual = settings.get(name);
+        if (!expected.equals(actual)) {
+            fail(phase + " connector topic setting " + name + " must be " + expected + ", was " + actual);
+        }
+    }
+
+    private static void expectConnectorTopicSettingFailure(
+            final Map<String, String> settings,
+            final String settingName) {
+        expectRenderedConnectorTopicSettingFailure(settings, settingName);
+        expectLiveConnectorTopicSettingFailure(settings, settingName);
+    }
+
+    private static void expectRenderedConnectorTopicSettingFailure(
+            final Map<String, String> settings,
+            final String settingName) {
+        try {
+            validateRenderedConnectorTopicSettings(settings);
+        } catch (final IllegalStateException e) {
+            expect(e.getMessage().contains(settingName), "rendered drift failure mentions " + settingName);
+            return;
+        }
+        fail("rendered connector topic setting drift should fail for " + settingName);
+    }
+
+    private static void expectLiveConnectorTopicSettingFailure(
+            final Map<String, String> settings,
+            final String settingName) {
+        try {
+            validateLiveConnectorTopicSettings(settings);
+        } catch (final IllegalStateException e) {
+            expect(e.getMessage().contains(settingName), "live drift failure mentions " + settingName);
+            return;
+        }
+        fail("live connector topic setting drift should fail for " + settingName);
+    }
+
+    private static String nativeHeartbeatTopic(final Map<String, String> settings) {
+        validateConnectorTopicSettings(settings, "native heartbeat");
+        return settings.get(TOPIC_HEARTBEAT_PREFIX_CONFIG) + settings.get(TOPIC_DELIMITER_CONFIG) + TOPIC_PREFIX;
     }
 
     private static String decimalDocumentJson(final String documentUuid) {
