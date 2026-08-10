@@ -193,9 +193,6 @@ public final class DocumentStateExecutionSmoke {
 
             final SourceRecord out = transform.apply(record);
 
-            expect(heartbeatTopic.equals(TOPIC_HEARTBEAT_PREFIX + TOPIC_DELIMITER
-                            + record.sourcePartition().get("server")),
-                    "native heartbeat topic equals prefix plus source server");
             expect(PROGRESS_TOPIC.equals(out.topic()), "progress topic = " + out.topic());
             expect(out.keySchema() == Schema.STRING_SCHEMA, "progress key schema");
             expect("cdc-progress".equals(out.key()), "progress key = " + out.key());

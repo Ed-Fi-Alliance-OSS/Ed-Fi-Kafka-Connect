@@ -104,13 +104,26 @@ through as a defensive byte copy, so the Kafka bytes are a plain JSON object wit
 Kafka Connect `schema` or `payload` wrapper, no Base64 encoding, and no second JSON
 serialization pass. Public tombstones remain record-level null values. Every other non-null
 record, including internal progress records, is delegated to Kafka Connect 4.3
-`JsonConverter` with `schemas.enable=false` and `decimal.format=NUMERIC`.
+`JsonConverter` with `schemas.enable=false` and `decimal.format=NUMERIC`. Keep
+`decimal.format=NUMERIC` as the required defensive delegate setting; public document
+upserts bypass the delegate, so public decimal fidelity does not depend on that setting.
 
 The transform builds the final JSON tree itself so collection objects preserve absent
 properties instead of gaining synthetic nulls, and valid `DocumentJson` integer and decimal
 values publish as exact JSON numbers. Do not replace this with `Double`/`Float`, string
 conversion, generic `JsonConverter` public upserts, Avro, Protobuf, or Schema Registry for
 the v1 document-state contract.
+
+For SQL Server source connectors, also set the Debezium source temporal mode explicitly:
+
+```properties
+time.precision.mode=isostring
+```
+
+`DocumentState` requires `dms.DocumentCache.LastModifiedAt` to arrive as a `STRING` with
+the `io.debezium.time.IsoTimestamp` logical type. Debezium's default `adaptive` mode emits
+SQL Server `datetime2(7)` as an `INT64` `io.debezium.time.NanoTimestamp`, which is rejected
+as an unsupported retained-row field shape.
 
 ## Running transformations
 

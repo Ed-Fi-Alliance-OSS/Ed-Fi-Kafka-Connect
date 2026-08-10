@@ -225,7 +225,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
             case DOCUMENT:
                 return documentOutputKind(sourceOperation);
             case HEARTBEAT:
-                return heartbeatOutputKind(sourceMetadata, sourceOperation);
+                return heartbeatOutputKind(sourceOperation);
             default:
                 throw transformationFailure(
                         FailureReason.UNSUPPORTED_SOURCE_TABLE, null, sourceMetadata, sourceOperation.code());
@@ -233,48 +233,23 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
     }
 
     private static OutputKind documentCacheOutputKind(final SourceOperation sourceOperation) {
-        switch (sourceOperation) {
-            case CREATE:
-            case UPDATE:
-            case READ:
-                return OutputKind.PUBLIC_UPSERT;
-            case DELETE:
-            case TRUNCATE:
-                return OutputKind.DROP;
-            default:
-                throw transformationFailure(
-                        FailureReason.UNSUPPORTED_SOURCE_OPERATION, null, null, sourceOperation.code());
-        }
+        return switch (sourceOperation) {
+            case CREATE, UPDATE, READ -> OutputKind.PUBLIC_UPSERT;
+            case DELETE, TRUNCATE -> OutputKind.DROP;
+        };
     }
 
     private static OutputKind documentOutputKind(final SourceOperation sourceOperation) {
-        switch (sourceOperation) {
-            case DELETE:
-                return OutputKind.PUBLIC_TOMBSTONE;
-            case CREATE:
-            case UPDATE:
-            case READ:
-            case TRUNCATE:
-                return OutputKind.DROP;
-            default:
-                throw transformationFailure(
-                        FailureReason.UNSUPPORTED_SOURCE_OPERATION, null, null, sourceOperation.code());
-        }
+        return switch (sourceOperation) {
+            case DELETE -> OutputKind.PUBLIC_TOMBSTONE;
+            case CREATE, UPDATE, READ, TRUNCATE -> OutputKind.DROP;
+        };
     }
 
-    private static OutputKind heartbeatOutputKind(
-            final SourceMetadata sourceMetadata, final SourceOperation sourceOperation) {
-        switch (sourceOperation) {
-            case CREATE:
-            case UPDATE:
-            case READ:
-            case DELETE:
-            case TRUNCATE:
-                return OutputKind.PROGRESS;
-            default:
-                throw transformationFailure(
-                        FailureReason.UNSUPPORTED_SOURCE_OPERATION, null, sourceMetadata, sourceOperation.code());
-        }
+    private static OutputKind heartbeatOutputKind(final SourceOperation sourceOperation) {
+        return switch (sourceOperation) {
+            case CREATE, UPDATE, READ, DELETE, TRUNCATE -> OutputKind.PROGRESS;
+        };
     }
 
     private static TransformationFailureException transformationFailure(
@@ -412,7 +387,6 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
         UNSUPPORTED_SOURCE_SCHEMA("unsupported source schema"),
         UNSUPPORTED_SOURCE_TABLE("unsupported source table"),
         UNEXPECTED_RETAINED_SOURCE_TABLE("unexpected retained source table"),
-        UNSUPPORTED_SOURCE_OPERATION("unsupported source operation"),
         MISSING_DOCUMENT_KEY("missing public document key"),
         UNSUPPORTED_DOCUMENT_KEY_SHAPE("unsupported public document key shape"),
         MISSING_DOCUMENT_UUID("missing DocumentUuid"),
