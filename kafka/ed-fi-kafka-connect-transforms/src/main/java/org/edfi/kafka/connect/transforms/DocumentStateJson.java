@@ -11,7 +11,6 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
-import java.util.Arrays;
 import java.util.Map;
 
 import org.apache.kafka.connect.connector.ConnectRecord;
@@ -211,7 +210,7 @@ final class DocumentStateJson {
 
         ByteBackedValue(final Schema schema, final byte[] value) {
             this.schema = schema;
-            this.value = Arrays.copyOf(value, value.length);
+            this.value = value;
         }
 
         Schema schema() {
@@ -219,7 +218,7 @@ final class DocumentStateJson {
         }
 
         byte[] value() {
-            return Arrays.copyOf(value, value.length);
+            return value;
         }
     }
 }
