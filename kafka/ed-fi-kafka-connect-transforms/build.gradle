@@ -103,7 +103,7 @@ dependencies {
 }
 
 checkstyle {
-    toolVersion "8.21"
+    toolVersion "8.36"
 }
 
 test {

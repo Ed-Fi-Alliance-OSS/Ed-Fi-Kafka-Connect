@@ -236,6 +236,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
         return switch (sourceOperation) {
             case CREATE, UPDATE, READ -> OutputKind.PUBLIC_UPSERT;
             case DELETE, TRUNCATE -> OutputKind.DROP;
+            default -> throw new IllegalStateException("Unhandled source operation: " + sourceOperation);
         };
     }
 
@@ -243,12 +244,14 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
         return switch (sourceOperation) {
             case DELETE -> OutputKind.PUBLIC_TOMBSTONE;
             case CREATE, UPDATE, READ, TRUNCATE -> OutputKind.DROP;
+            default -> throw new IllegalStateException("Unhandled source operation: " + sourceOperation);
         };
     }
 
     private static OutputKind heartbeatOutputKind(final SourceOperation sourceOperation) {
         return switch (sourceOperation) {
             case CREATE, UPDATE, READ, DELETE, TRUNCATE -> OutputKind.PROGRESS;
+            default -> throw new IllegalStateException("Unhandled source operation: " + sourceOperation);
         };
     }
 
