@@ -29,6 +29,7 @@ final class DocumentStateTestRecords {
     static final String POSTGRESQL_JSON_SCHEMA = "io.debezium.data.Json";
     static final String POSTGRESQL_TIMESTAMP_SCHEMA = "io.debezium.time.ZonedTimestamp";
     static final String SQLSERVER_TIMESTAMP_SCHEMA = "io.debezium.time.IsoTimestamp";
+    static final int DEBEZIUM_LOGICAL_SCHEMA_VERSION = 1;
     static final String DOCUMENT_UUID_FIELD = "DocumentUuid";
     static final String PROJECT_NAME_FIELD = "ProjectName";
     static final String RESOURCE_NAME_FIELD = "ResourceName";
@@ -135,6 +136,7 @@ final class DocumentStateTestRecords {
     static Schema documentBeforeRowSchema(final String provider, final Schema documentUuidSchema) {
         return SchemaBuilder.struct()
                 .name("server.dms." + sourceSchemaName(provider) + ".Document.Value")
+                .optional()
                 .field(DOCUMENT_UUID_FIELD, documentUuidSchema)
                 .build();
     }
@@ -142,28 +144,41 @@ final class DocumentStateTestRecords {
     static Schema documentBeforeRowSchemaWithoutDocumentUuid(final String provider) {
         return SchemaBuilder.struct()
                 .name("server.dms." + sourceSchemaName(provider) + ".Document.Value")
+                .optional()
                 .build();
     }
 
     static Schema pinnedUuidSchema(final String provider) {
         if (DocumentState.POSTGRESQL_PROVIDER.equals(provider)) {
-            return SchemaBuilder.string().name(POSTGRESQL_UUID_SCHEMA).build();
+            return SchemaBuilder.string()
+                    .name(POSTGRESQL_UUID_SCHEMA)
+                    .version(DEBEZIUM_LOGICAL_SCHEMA_VERSION)
+                    .build();
         }
         return Schema.STRING_SCHEMA;
     }
 
     static Schema documentJsonSchema(final String provider) {
         if (DocumentState.POSTGRESQL_PROVIDER.equals(provider)) {
-            return SchemaBuilder.string().name(POSTGRESQL_JSON_SCHEMA).build();
+            return SchemaBuilder.string()
+                    .name(POSTGRESQL_JSON_SCHEMA)
+                    .version(DEBEZIUM_LOGICAL_SCHEMA_VERSION)
+                    .build();
         }
         return Schema.STRING_SCHEMA;
     }
 
     static Schema lastModifiedAtSchema(final String provider) {
         if (DocumentState.POSTGRESQL_PROVIDER.equals(provider)) {
-            return SchemaBuilder.string().name(POSTGRESQL_TIMESTAMP_SCHEMA).build();
+            return SchemaBuilder.string()
+                    .name(POSTGRESQL_TIMESTAMP_SCHEMA)
+                    .version(DEBEZIUM_LOGICAL_SCHEMA_VERSION)
+                    .build();
         }
-        return SchemaBuilder.string().name(SQLSERVER_TIMESTAMP_SCHEMA).build();
+        return SchemaBuilder.string()
+                .name(SQLSERVER_TIMESTAMP_SCHEMA)
+                .version(DEBEZIUM_LOGICAL_SCHEMA_VERSION)
+                .build();
     }
 
     private static SourceRecord documentCacheRecord(
@@ -322,7 +337,8 @@ final class DocumentStateTestRecords {
 
         Struct build() {
             final SchemaBuilder builder = SchemaBuilder.struct()
-                    .name("server.dms." + sourceSchemaName(provider) + ".DocumentCache.Value");
+                    .name("server.dms." + sourceSchemaName(provider) + ".DocumentCache.Value")
+                    .optional();
             for (final Map.Entry<String, Schema> entry : schemas.entrySet()) {
                 builder.field(entry.getKey(), entry.getValue());
             }

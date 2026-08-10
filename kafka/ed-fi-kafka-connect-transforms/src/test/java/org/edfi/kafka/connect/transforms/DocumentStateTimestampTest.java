@@ -85,9 +85,25 @@ class DocumentStateTimestampTest {
                         "2026-07-30T14:15:16Z",
                         DocumentState.FailureReason.UNSUPPORTED_REQUIRED_FIELD_SHAPE),
                 invalidTimestamp(
+                        DocumentState.POSTGRESQL_PROVIDER,
+                        SchemaBuilder.string()
+                                .name(DocumentStateTestRecords.POSTGRESQL_TIMESTAMP_SCHEMA)
+                                .version(2)
+                                .build(),
+                        "2026-07-30T14:15:16Z",
+                        DocumentState.FailureReason.UNSUPPORTED_REQUIRED_FIELD_SHAPE),
+                invalidTimestamp(
                         DocumentState.SQLSERVER_PROVIDER,
                         Schema.INT64_SCHEMA,
                         1L,
+                        DocumentState.FailureReason.UNSUPPORTED_REQUIRED_FIELD_SHAPE),
+                invalidTimestamp(
+                        DocumentState.SQLSERVER_PROVIDER,
+                        SchemaBuilder.string()
+                                .name(DocumentStateTestRecords.SQLSERVER_TIMESTAMP_SCHEMA)
+                                .version(2)
+                                .build(),
+                        "2026-07-30T14:15:16Z",
                         DocumentState.FailureReason.UNSUPPORTED_REQUIRED_FIELD_SHAPE),
                 invalidTimestamp(
                         DocumentState.POSTGRESQL_PROVIDER,

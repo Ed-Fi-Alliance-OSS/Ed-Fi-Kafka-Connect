@@ -71,6 +71,22 @@ class DocumentStateTombstoneTest {
     }
 
     @Test
+    void Given_Document_Delete_Before_Row_Field_Is_Required_Should_Fail() {
+        final Schema beforeSchema = requiredPostgresqlDocumentBeforeRowSchema();
+        final SourceRecord record = DocumentStateTestRecords.documentDeleteRecordWithBeforeSchema(
+                DocumentState.POSTGRESQL_PROVIDER,
+                beforeSchema,
+                DocumentStateTestRecords.documentBeforeRow(
+                        beforeSchema, DocumentStateTestRecords.DOCUMENT_UUID));
+
+        final Throwable thrown = catchThrowable(() -> DocumentStateTestRecords
+                .configuredTransform(DocumentState.POSTGRESQL_PROVIDER)
+                .apply(record));
+
+        assertFailure(thrown, DocumentState.FailureReason.UNSUPPORTED_RETAINED_ROW_SHAPE, "Document");
+    }
+
+    @Test
     void Given_Postgresql_Document_Delete_Before_DocumentUuid_Unavailable_Marker_Should_Fail() {
         final Schema beforeSchema = DocumentStateTestRecords.documentBeforeRowSchema(
                 DocumentState.POSTGRESQL_PROVIDER,
@@ -182,7 +198,11 @@ class DocumentStateTombstoneTest {
                 DocumentStateTestRecords.pinnedUuidSchema(DocumentState.POSTGRESQL_PROVIDER));
         final Schema postgresqlNullableBeforeSchema = DocumentStateTestRecords.documentBeforeRowSchema(
                 DocumentState.POSTGRESQL_PROVIDER,
-                SchemaBuilder.string().name(DocumentStateTestRecords.POSTGRESQL_UUID_SCHEMA).optional().build());
+                SchemaBuilder.string()
+                        .name(DocumentStateTestRecords.POSTGRESQL_UUID_SCHEMA)
+                        .version(DocumentStateTestRecords.DEBEZIUM_LOGICAL_SCHEMA_VERSION)
+                        .optional()
+                        .build());
         final Schema sqlServerBeforeSchema = DocumentStateTestRecords.documentBeforeRowSchema(
                 DocumentState.SQLSERVER_PROVIDER,
                 DocumentStateTestRecords.pinnedUuidSchema(DocumentState.SQLSERVER_PROVIDER));
@@ -202,6 +222,13 @@ class DocumentStateTombstoneTest {
     private static Stream<Object[]> nonPinnedBeforeDocumentUuidShapes() {
         return Stream.of(
                 new Object[] {DocumentState.POSTGRESQL_PROVIDER, Schema.STRING_SCHEMA},
+                new Object[] {
+                    DocumentState.POSTGRESQL_PROVIDER,
+                    SchemaBuilder.string()
+                            .name(DocumentStateTestRecords.POSTGRESQL_UUID_SCHEMA)
+                            .version(2)
+                            .build()
+                },
                 new Object[] {
                     DocumentState.SQLSERVER_PROVIDER,
                     SchemaBuilder.string().name(DocumentStateTestRecords.POSTGRESQL_UUID_SCHEMA).build()
@@ -252,6 +279,15 @@ class DocumentStateTombstoneTest {
                     beforeSchema,
                     DocumentStateTestRecords.documentBeforeRow(beforeSchema, SQLSERVER_UNAVAILABLE_VALUE))
         };
+    }
+
+    private static Schema requiredPostgresqlDocumentBeforeRowSchema() {
+        return SchemaBuilder.struct()
+                .name("server.dms." + DocumentStateTestRecords.POSTGRESQL_SOURCE_SCHEMA + ".Document.Value")
+                .field(
+                        DocumentStateTestRecords.DOCUMENT_UUID_FIELD,
+                        DocumentStateTestRecords.pinnedUuidSchema(DocumentState.POSTGRESQL_PROVIDER))
+                .build();
     }
 
     private static void assertFailure(

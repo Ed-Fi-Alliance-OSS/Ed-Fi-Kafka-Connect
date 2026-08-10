@@ -55,6 +55,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
     private static final String POSTGRESQL_TIMESTAMP_SCHEMA_NAME = "io.debezium.time.ZonedTimestamp";
     private static final String SQLSERVER_TIMESTAMP_SCHEMA_NAME = "io.debezium.time.IsoTimestamp";
     private static final String SQLSERVER_UNAVAILABLE_VALUE = "__debezium_unavailable_value";
+    private static final int DEBEZIUM_LOGICAL_SCHEMA_VERSION = 1;
     private static final int MAX_METADATA_VALUE_LENGTH = 128;
 
     public static final ConfigDef CONFIG_DEF = new ConfigDef()
@@ -841,7 +842,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
             if (beforeField == null) {
                 return null;
             }
-            if (beforeField.schema().type() != Schema.Type.STRUCT) {
+            if (!isOptionalStructSchema(beforeField.schema())) {
                 throw classifiedFailure(FailureReason.UNSUPPORTED_RETAINED_ROW_SHAPE, record, classifiedRecord);
             }
 
@@ -872,7 +873,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
             if (afterField == null) {
                 throw classifiedFailure(FailureReason.MISSING_RETAINED_ROW, record, classifiedRecord);
             }
-            if (afterField.schema().type() != Schema.Type.STRUCT) {
+            if (!isOptionalStructSchema(afterField.schema())) {
                 throw classifiedFailure(FailureReason.UNSUPPORTED_RETAINED_ROW_SHAPE, record, classifiedRecord);
             }
 
@@ -980,7 +981,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
                 return false;
             }
             if (fieldKind == FieldKind.DOCUMENT_JSON && provider == Provider.POSTGRESQL) {
-                return POSTGRESQL_JSON_SCHEMA_NAME.equals(schema.name());
+                return isDebeziumLogicalSchema(schema, POSTGRESQL_JSON_SCHEMA_NAME);
             }
             return schema.name() == null;
         }
@@ -990,10 +991,10 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
                 return false;
             }
             if (provider == Provider.POSTGRESQL) {
-                return POSTGRESQL_TIMESTAMP_SCHEMA_NAME.equals(schema.name());
+                return isDebeziumLogicalSchema(schema, POSTGRESQL_TIMESTAMP_SCHEMA_NAME);
             }
             if (provider == Provider.SQLSERVER) {
-                return SQLSERVER_TIMESTAMP_SCHEMA_NAME.equals(schema.name());
+                return isDebeziumLogicalSchema(schema, SQLSERVER_TIMESTAMP_SCHEMA_NAME);
             }
             return false;
         }
@@ -1026,12 +1027,21 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
                 return false;
             }
             if (provider == Provider.POSTGRESQL) {
-                return POSTGRESQL_UUID_SCHEMA_NAME.equals(schema.name());
+                return isDebeziumLogicalSchema(schema, POSTGRESQL_UUID_SCHEMA_NAME);
             }
             if (provider == Provider.SQLSERVER) {
                 return schema.name() == null;
             }
             return false;
+        }
+
+        private boolean isOptionalStructSchema(final Schema schema) {
+            return schema.type() == Schema.Type.STRUCT && schema.isOptional();
+        }
+
+        private boolean isDebeziumLogicalSchema(final Schema schema, final String schemaName) {
+            return schemaName.equals(schema.name())
+                    && Integer.valueOf(DEBEZIUM_LOGICAL_SCHEMA_VERSION).equals(schema.version());
         }
 
         private String normalizeDocumentUuid(

@@ -96,6 +96,23 @@ class DocumentStateKeyTest {
     }
 
     @Test
+    void Given_DocumentCache_After_Row_Field_Is_Required_Should_Fail() {
+        final Schema requiredRowSchema = requiredRowStructSchema(
+                DocumentState.POSTGRESQL_PROVIDER, pinnedUuidSchema(DocumentState.POSTGRESQL_PROVIDER));
+        final SourceRecord record = documentCacheRecord(
+                DocumentState.POSTGRESQL_PROVIDER,
+                keyStructSchema(DocumentState.POSTGRESQL_PROVIDER, pinnedUuidSchema(DocumentState.POSTGRESQL_PROVIDER)),
+                keyStruct(DocumentState.POSTGRESQL_PROVIDER, DOCUMENT_UUID),
+                requiredRowSchema,
+                rowStruct(requiredRowSchema, DOCUMENT_UUID));
+
+        final Throwable thrown = catchThrowable(() -> configuredTransform(DocumentState.POSTGRESQL_PROVIDER)
+                .apply(record));
+
+        assertFailure(thrown, DocumentState.FailureReason.UNSUPPORTED_RETAINED_ROW_SHAPE);
+    }
+
+    @Test
     void Given_Recognized_Drop_With_Malformed_Key_Should_Not_Validate_Key() {
         final SourceRecord record = record(
                 DocumentState.POSTGRESQL_PROVIDER,
@@ -155,6 +172,15 @@ class DocumentStateKeyTest {
                         DocumentState.FailureReason.INVALID_DOCUMENT_UUID),
                 invalidKey(
                         DocumentState.POSTGRESQL_PROVIDER,
+                        keyStructSchema(DocumentState.POSTGRESQL_PROVIDER,
+                                postgresqlUuidSchemaWithVersion(2)),
+                        keyStruct(
+                                keyStructSchema(DocumentState.POSTGRESQL_PROVIDER,
+                                        postgresqlUuidSchemaWithVersion(2)),
+                                DOCUMENT_UUID),
+                        DocumentState.FailureReason.UNSUPPORTED_DOCUMENT_KEY_SHAPE),
+                invalidKey(
+                        DocumentState.POSTGRESQL_PROVIDER,
                         keyStructSchema(DocumentState.POSTGRESQL_PROVIDER, Schema.STRING_SCHEMA),
                         keyStruct(keyStructSchema(DocumentState.POSTGRESQL_PROVIDER, Schema.STRING_SCHEMA),
                                 DOCUMENT_UUID),
@@ -182,6 +208,7 @@ class DocumentStateKeyTest {
     private static Stream<Object[]> unsupportedCacheRowDocumentUuids() {
         return Stream.of(
                 new Object[] {DocumentState.POSTGRESQL_PROVIDER, Schema.STRING_SCHEMA},
+                new Object[] {DocumentState.POSTGRESQL_PROVIDER, postgresqlUuidSchemaWithVersion(2)},
                 new Object[] {
                     DocumentState.SQLSERVER_PROVIDER, SchemaBuilder.string().name(POSTGRESQL_UUID_SCHEMA).build()
                 });
@@ -296,15 +323,27 @@ class DocumentStateKeyTest {
     private static Schema rowStructSchema(final String provider, final Schema documentUuidSchema) {
         return SchemaBuilder.struct()
                 .name("server.dms." + sourceSchemaName(provider) + ".DocumentCache.Value")
+                .optional()
+                .field("DocumentUuid", documentUuidSchema)
+                .build();
+    }
+
+    private static Schema requiredRowStructSchema(final String provider, final Schema documentUuidSchema) {
+        return SchemaBuilder.struct()
+                .name("server.dms." + sourceSchemaName(provider) + ".DocumentCache.Value")
                 .field("DocumentUuid", documentUuidSchema)
                 .build();
     }
 
     private static Schema pinnedUuidSchema(final String provider) {
         if (DocumentState.POSTGRESQL_PROVIDER.equals(provider)) {
-            return SchemaBuilder.string().name(POSTGRESQL_UUID_SCHEMA).build();
+            return postgresqlUuidSchemaWithVersion(DocumentStateTestRecords.DEBEZIUM_LOGICAL_SCHEMA_VERSION);
         }
         return Schema.STRING_SCHEMA;
+    }
+
+    private static Schema postgresqlUuidSchemaWithVersion(final int version) {
+        return SchemaBuilder.string().name(POSTGRESQL_UUID_SCHEMA).version(version).build();
     }
 
     private static Schema sourceSchema(final String sourceSchemaName) {

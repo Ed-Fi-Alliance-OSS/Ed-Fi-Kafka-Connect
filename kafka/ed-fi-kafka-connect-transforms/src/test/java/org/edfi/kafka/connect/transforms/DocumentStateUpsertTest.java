@@ -338,6 +338,18 @@ class DocumentStateUpsertTest {
                 malformedRow(
                         DocumentStateTestRecords
                                 .cacheRowBuilder(DocumentState.POSTGRESQL_PROVIDER)
+                                .field(DocumentStateTestRecords.DOCUMENT_JSON_FIELD,
+                                        SchemaBuilder.string()
+                                                .name(DocumentStateTestRecords.POSTGRESQL_JSON_SCHEMA)
+                                                .version(2)
+                                                .build(),
+                                        "{\"id\":\"" + DocumentStateTestRecords.DOCUMENT_UUID
+                                                + "\",\"_lastModifiedDate\":\"2026-07-30T14:15:16Z\"}")
+                                .build(),
+                        DocumentState.FailureReason.UNSUPPORTED_REQUIRED_FIELD_SHAPE),
+                malformedRow(
+                        DocumentStateTestRecords
+                                .cacheRowBuilder(DocumentState.POSTGRESQL_PROVIDER)
                                 .omit(DocumentStateTestRecords.CONTENT_VERSION_FIELD)
                                 .build(),
                         DocumentState.FailureReason.MISSING_REQUIRED_FIELD),
