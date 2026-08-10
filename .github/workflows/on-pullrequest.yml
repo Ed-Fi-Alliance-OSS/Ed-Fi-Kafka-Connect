@@ -26,6 +26,10 @@ concurrency:
 
 permissions: read-all
 
+env:
+  # Shared DMS fixture pin; validate-dms-fixture-ref.sh keeps it main-reachable and fixture-current.
+  DMS_FIXTURE_REF: adc562b669d7b34c1a1ef9b84b53f0f93082e5f0
+
 jobs:
   scan-actions-bidi:
     name: Scan Actions, scan all files for BIDI Trojan Attacks
@@ -180,8 +184,12 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: Ed-Fi-Alliance-OSS/Data-Management-Service
-          ref: 2dece6c0c02b7ef9bd4af88185eae1e2a2ef95bc
+          ref: ${{ env.DMS_FIXTURE_REF }}
+          fetch-depth: 0
           path: dms
+
+      - name: Validate DMS fixture pin
+        run: bash ${{ github.workspace }}/.github/scripts/validate-dms-fixture-ref.sh ${{ github.workspace }}/dms
 
       - name: Run the ExpandJson execution smoke inside the Kafka Connect 4.3 image
         run: |
@@ -216,8 +224,12 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: Ed-Fi-Alliance-OSS/Data-Management-Service
-          ref: 2dece6c0c02b7ef9bd4af88185eae1e2a2ef95bc
+          ref: ${{ env.DMS_FIXTURE_REF }}
+          fetch-depth: 0
           path: dms
+
+      - name: Validate DMS fixture pin
+        run: bash ${{ github.workspace }}/.github/scripts/validate-dms-fixture-ref.sh ${{ github.workspace }}/dms
 
       - name: Dependency Review ("Dependabot on PR")
         if: ${{ github.event_name == 'pull_request' && !github.event.repository.fork }}
