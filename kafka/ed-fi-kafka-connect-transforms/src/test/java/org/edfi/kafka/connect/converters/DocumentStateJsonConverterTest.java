@@ -7,12 +7,14 @@ package org.edfi.kafka.connect.converters;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.ServiceLoader;
 import java.util.stream.Stream;
 
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaAndValue;
 import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.errors.DataException;
+import org.apache.kafka.connect.storage.Converter;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -80,6 +82,15 @@ class DocumentStateJsonConverterTest {
 
         assertThat(converted.value()).isInstanceOf(Map.class);
         assertThat(((Map<?, ?>) converted.value()).get("progress")).isEqualTo(true);
+    }
+
+    @Test
+    void Given_ServiceLoader_Should_Load_DocumentStateJsonConverter() {
+        final boolean loaded = ServiceLoader.load(Converter.class)
+                .stream()
+                .anyMatch(provider -> provider.type().equals(DocumentStateJsonConverter.class));
+
+        assertThat(loaded).isTrue();
     }
 
     private static Stream<Object[]> invalidPublicHandshakes() {
