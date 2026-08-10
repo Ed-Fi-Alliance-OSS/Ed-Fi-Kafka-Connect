@@ -256,6 +256,39 @@ class DocumentStateUpsertTest {
         assertThat(items.get(1).has("b")).isTrue();
     }
 
+    @Test
+    void Given_Advertised_ValueSchema_Differs_From_Value_Struct_Schema_Should_Fail_Before_Public_Output() {
+        final Struct after = DocumentStateTestRecords
+                .cacheRowBuilder(DocumentState.POSTGRESQL_PROVIDER)
+                .build();
+        final SourceRecord record = DocumentStateTestRecords
+                .documentCacheRecord(DocumentState.POSTGRESQL_PROVIDER, after);
+        final SourceRecord mismatchedRecord = new SourceRecord(
+                record.sourcePartition(),
+                record.sourceOffset(),
+                record.topic(),
+                record.kafkaPartition(),
+                record.keySchema(),
+                record.key(),
+                valueSchemaWithExtraField(record.valueSchema()),
+                record.value(),
+                record.timestamp(),
+                record.headers());
+
+        final Throwable thrown = catchThrowable(() -> DocumentStateTestRecords
+                .configuredTransform(DocumentState.POSTGRESQL_PROVIDER)
+                .apply(mismatchedRecord));
+
+        assertThat(thrown)
+                .isInstanceOf(DataException.class)
+                .isInstanceOf(DocumentState.TransformationFailureException.class);
+        final DocumentState.TransformationFailureException exception =
+                (DocumentState.TransformationFailureException) thrown;
+        assertThat(exception.reason()).isEqualTo(
+                DocumentState.FailureReason.UNSUPPORTED_SOURCE_METADATA_SHAPE);
+        assertThat(exception.metadata()).containsOnlyKeys("provider", "sourceTopic");
+    }
+
     @ParameterizedTest
     @MethodSource("malformedDocumentJsonRows")
     void Given_Malformed_DocumentJson_Should_Fail_With_Stable_Reason(
@@ -398,6 +431,14 @@ class DocumentStateUpsertTest {
 
     private static Iterable<String> fieldNames(final JsonNode node) {
         return node::fieldNames;
+    }
+
+    private static Schema valueSchemaWithExtraField(final Schema valueSchema) {
+        final SchemaBuilder builder = SchemaBuilder.struct();
+        for (final var field : valueSchema.fields()) {
+            builder.field(field.name(), field.schema());
+        }
+        return builder.field("unexpected", Schema.OPTIONAL_STRING_SCHEMA).build();
     }
 
     private static void assertNumericDecimal(final JsonNode node, final BigDecimal expected) {

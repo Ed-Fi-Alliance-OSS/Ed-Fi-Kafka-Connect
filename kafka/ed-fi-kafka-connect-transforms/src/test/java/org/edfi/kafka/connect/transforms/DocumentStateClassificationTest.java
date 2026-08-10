@@ -129,6 +129,25 @@ class DocumentStateClassificationTest {
     }
 
     @Test
+    void Given_Advertised_ValueSchema_Differs_From_Value_Struct_Schema_Should_Fail_Closed() {
+        final DocumentState<SourceRecord> transform = configuredTransform(DocumentState.POSTGRESQL_PROVIDER);
+        final Schema sourceSchema = sourceSchema(POSTGRESQL_SOURCE_SCHEMA);
+        final Schema valueStructSchema = SchemaBuilder.struct()
+                .field("source", sourceSchema)
+                .field("op", Schema.STRING_SCHEMA)
+                .build();
+        final Schema advertisedValueSchema = valueSchemaWithExtraField(valueStructSchema);
+        final Struct value = new Struct(valueStructSchema)
+                .put("source", source(sourceSchema, "dms", "DocumentCache"))
+                .put("op", "c");
+
+        assertThatThrownBy(() -> transform.classify(record(advertisedValueSchema, value)))
+                .isInstanceOf(DocumentState.TransformationFailureException.class)
+                .extracting("reason")
+                .isEqualTo(DocumentState.FailureReason.UNSUPPORTED_SOURCE_METADATA_SHAPE);
+    }
+
+    @Test
     void Given_Missing_Operation_Metadata_Should_Fail() {
         final DocumentState<SourceRecord> transform = configuredTransform(DocumentState.POSTGRESQL_PROVIDER);
         final Schema sourceSchema = sourceSchema(POSTGRESQL_SOURCE_SCHEMA);
@@ -376,6 +395,14 @@ class DocumentStateClassificationTest {
             final String topic,
             final Map<String, ?> sourcePartition) {
         return new SourceRecord(sourcePartition, sourceOffset(), topic, null, null, null, null);
+    }
+
+    private static Schema valueSchemaWithExtraField(final Schema valueSchema) {
+        final SchemaBuilder builder = SchemaBuilder.struct();
+        for (final var field : valueSchema.fields()) {
+            builder.field(field.name(), field.schema());
+        }
+        return builder.field("unexpected", Schema.OPTIONAL_STRING_SCHEMA).build();
     }
 
     private static Schema sourceSchema(final String sourceSchemaName) {

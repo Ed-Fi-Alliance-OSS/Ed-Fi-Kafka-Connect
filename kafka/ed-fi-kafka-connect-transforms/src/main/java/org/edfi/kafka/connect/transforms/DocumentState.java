@@ -242,7 +242,13 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
         if (!(value instanceof Struct)) {
             throw transformationFailure(FailureReason.MISSING_SOURCE_METADATA, provider, record, null, null);
         }
-        return (Struct) value;
+        final Struct structValue = (Struct) value;
+        final Schema valueSchema = requireValueSchema(record, provider);
+        if (!valueSchema.equals(structValue.schema())) {
+            throw transformationFailure(
+                    FailureReason.UNSUPPORTED_SOURCE_METADATA_SHAPE, provider, record, null, null);
+        }
+        return structValue;
     }
 
     private static OutputKind outputKind(final SourceMetadata sourceMetadata, final SourceOperation sourceOperation) {
@@ -762,7 +768,8 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
                 throw transformationFailure(FailureReason.MISSING_SOURCE_METADATA, provider, record, null, null);
             }
             final Struct sourceStruct = (Struct) source;
-            if (!sourceSchemaName.equals(sourceStruct.schema().name())) {
+            if (!sourceField.schema().equals(sourceStruct.schema())
+                    || !sourceSchemaName.equals(sourceStruct.schema().name())) {
                 throw transformationFailure(
                         FailureReason.UNSUPPORTED_SOURCE_METADATA_SHAPE, provider, record, null, null);
             }
@@ -793,7 +800,12 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
                 throw classifiedFailure(FailureReason.UNSUPPORTED_DOCUMENT_KEY_SHAPE, record, classifiedRecord);
             }
 
-            final String documentUuid = documentUuid((Struct) key, record, classifiedRecord,
+            final Struct keyStruct = (Struct) key;
+            if (!keySchema.equals(keyStruct.schema())) {
+                throw classifiedFailure(FailureReason.UNSUPPORTED_DOCUMENT_KEY_SHAPE, record, classifiedRecord);
+            }
+
+            final String documentUuid = documentUuid(keyStruct, record, classifiedRecord,
                     FailureReason.UNSUPPORTED_DOCUMENT_KEY_SHAPE);
             return new ValidatedDocumentKey(documentUuid);
         }
@@ -853,7 +865,11 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
             if (!(before instanceof Struct)) {
                 throw classifiedFailure(FailureReason.UNSUPPORTED_RETAINED_ROW_SHAPE, record, classifiedRecord);
             }
-            return (Struct) before;
+            final Struct beforeStruct = (Struct) before;
+            if (!beforeField.schema().equals(beforeStruct.schema())) {
+                throw classifiedFailure(FailureReason.UNSUPPORTED_RETAINED_ROW_SHAPE, record, classifiedRecord);
+            }
+            return beforeStruct;
         }
 
         private boolean isAbsentDeleteBeforeDocumentUuid(final Object value, final Schema schema) {
@@ -881,7 +897,11 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
             if (!(after instanceof Struct)) {
                 throw classifiedFailure(FailureReason.MISSING_RETAINED_ROW, record, classifiedRecord);
             }
-            return (Struct) after;
+            final Struct afterStruct = (Struct) after;
+            if (!afterField.schema().equals(afterStruct.schema())) {
+                throw classifiedFailure(FailureReason.UNSUPPORTED_RETAINED_ROW_SHAPE, record, classifiedRecord);
+            }
+            return afterStruct;
         }
 
         private RetainedCacheRow cacheRow(

@@ -186,6 +186,11 @@ class DocumentStateKeyTest {
                                 DOCUMENT_UUID),
                         DocumentState.FailureReason.UNSUPPORTED_DOCUMENT_KEY_SHAPE),
                 invalidKey(
+                        DocumentState.POSTGRESQL_PROVIDER,
+                        keyStructSchemaWithExtraField(DocumentState.POSTGRESQL_PROVIDER),
+                        keyStruct(DocumentState.POSTGRESQL_PROVIDER, DOCUMENT_UUID),
+                        DocumentState.FailureReason.UNSUPPORTED_DOCUMENT_KEY_SHAPE),
+                invalidKey(
                         DocumentState.SQLSERVER_PROVIDER,
                         keyStructSchema(DocumentState.SQLSERVER_PROVIDER,
                                 SchemaBuilder.string().name(POSTGRESQL_UUID_SCHEMA).build()),
@@ -305,6 +310,14 @@ class DocumentStateKeyTest {
         return SchemaBuilder.struct()
                 .name("server.dms." + sourceSchemaName(provider) + ".Key")
                 .field("DocumentUuid", documentUuidSchema)
+                .build();
+    }
+
+    private static Schema keyStructSchemaWithExtraField(final String provider) {
+        return SchemaBuilder.struct()
+                .name("server.dms." + sourceSchemaName(provider) + ".Key")
+                .field("DocumentUuid", pinnedUuidSchema(provider))
+                .field("Unexpected", Schema.OPTIONAL_STRING_SCHEMA)
                 .build();
     }
 
