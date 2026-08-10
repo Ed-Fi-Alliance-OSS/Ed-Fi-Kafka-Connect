@@ -14,6 +14,7 @@ import org.apache.kafka.connect.data.Field;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.source.SourceRecord;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import org.edfi.kafka.connect.converters.DocumentStateJsonConverter;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -28,6 +29,7 @@ class DocumentStateSharedFixtureTest {
     private static final String ORDINARY_CASE = "ordinary-link-bearing-student-school-association";
     private static final String DESCRIPTOR_CASE = "descriptor-school-type";
     private static final String EXTENSION_CASE = "extension-student-school-association";
+    private static final String PROPERTY_ABSENCE_CASE = "school-address-property-absence";
 
     @ParameterizedTest
     @MethodSource("representativeSharedFixtures")
@@ -51,6 +53,28 @@ class DocumentStateSharedFixtureTest {
         assertThat(DocumentStateSharedFixtures.serializedPublicValue(result))
                 .isEqualTo(DocumentStateSharedFixtures.toJson(fixture.expectedEnvelope()));
         assertThat(fixture.expectedDocument().has(expectedDocumentField)).isTrue();
+    }
+
+    @ParameterizedTest
+    @MethodSource("providers")
+    void Given_Shared_Collection_Fixture_Should_Preserve_Property_Absence_Through_Converter(
+            final String provider) throws IOException {
+        final DocumentStateSharedFixtures.SharedFixture fixture =
+                DocumentStateSharedFixtures.load(PROPERTY_ABSENCE_CASE);
+        final SourceRecord result = DocumentStateTestRecords
+                .configuredTransform(provider)
+                .apply(fixture.publicUpsertRecord(provider));
+
+        final JsonNode serializedValue = DocumentStateSharedFixtures.serializedPublicValue(result);
+
+        assertPublicJsonBytes(result);
+        assertThat(serializedValue).isEqualTo(DocumentStateSharedFixtures.toJson(fixture.expectedEnvelope()));
+        final JsonNode addresses = serializedValue.get("document").get("addresses");
+        assertThat(addresses.get(0).has("addressTypeDescriptor")).isTrue();
+        assertThat(addresses.get(0).get("addressTypeDescriptor").isNull()).isFalse();
+        assertThat(addresses.get(1).has("addressTypeDescriptor")).isFalse();
+        assertThat(addresses.get(1).has("city")).isTrue();
+        assertNoExplicitNull(serializedValue, "$");
     }
 
     @ParameterizedTest
@@ -104,9 +128,11 @@ class DocumentStateSharedFixtureTest {
                 representativeSharedFixture(ORDINARY_CASE, DocumentState.POSTGRESQL_PROVIDER, "schoolReference"),
                 representativeSharedFixture(DESCRIPTOR_CASE, DocumentState.POSTGRESQL_PROVIDER, "namespace"),
                 representativeSharedFixture(EXTENSION_CASE, DocumentState.POSTGRESQL_PROVIDER, "_ext"),
+                representativeSharedFixture(PROPERTY_ABSENCE_CASE, DocumentState.POSTGRESQL_PROVIDER, "addresses"),
                 representativeSharedFixture(ORDINARY_CASE, DocumentState.SQLSERVER_PROVIDER, "schoolReference"),
                 representativeSharedFixture(DESCRIPTOR_CASE, DocumentState.SQLSERVER_PROVIDER, "namespace"),
-                representativeSharedFixture(EXTENSION_CASE, DocumentState.SQLSERVER_PROVIDER, "_ext"));
+                representativeSharedFixture(EXTENSION_CASE, DocumentState.SQLSERVER_PROVIDER, "_ext"),
+                representativeSharedFixture(PROPERTY_ABSENCE_CASE, DocumentState.SQLSERVER_PROVIDER, "addresses"));
     }
 
     private static Object[] representativeSharedFixture(
@@ -138,6 +164,18 @@ class DocumentStateSharedFixtureTest {
         assertThat(result.valueSchema().version()).isEqualTo(DocumentStateJsonConverter.PUBLIC_SCHEMA_VERSION);
         assertThat(result.valueSchema().isOptional()).isFalse();
         assertThat(result.value()).isInstanceOf(byte[].class);
+    }
+
+    private static void assertNoExplicitNull(final JsonNode node, final String path) {
+        assertThat(node.isNull()).as(path).isFalse();
+        if (node.isObject()) {
+            node.fields().forEachRemaining(entry ->
+                    assertNoExplicitNull(entry.getValue(), path + "." + entry.getKey()));
+        } else if (node.isArray()) {
+            for (int index = 0; index < node.size(); index += 1) {
+                assertNoExplicitNull(node.get(index), path + "[" + index + "]");
+            }
+        }
     }
 
     private static String sourceSchemaName(final String provider) {

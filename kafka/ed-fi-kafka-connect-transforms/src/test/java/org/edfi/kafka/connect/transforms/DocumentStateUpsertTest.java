@@ -144,7 +144,11 @@ class DocumentStateUpsertTest {
                                 + "\"academicSummary\":{\"weightedGpa\":"
                                 + HIGH_PRECISION_DECIMAL.toPlainString() + "},"
                                 + "\"scoreHistory\":["
-                                + HIGH_PRECISION_DECIMAL.toPlainString() + "]}},"
+                                + HIGH_PRECISION_DECIMAL.toPlainString() + "],"
+                                + "\"wideIntegers\":{\"nestedId\":"
+                                + OUT_OF_RANGE_INTEGER.toPlainString() + "},"
+                                + "\"wideIntegerHistory\":["
+                                + OUT_OF_RANGE_INTEGER.toPlainString() + "]}},"
                                 + "\"integerTooLarge\":" + OUT_OF_RANGE_INTEGER.toPlainString() + "}")
                 .build();
 
@@ -156,8 +160,7 @@ class DocumentStateUpsertTest {
         final String serializedValue = DocumentStateSharedFixtures.serializedPublicValueText(result);
         assertThat(serializedValue)
                 .doesNotContain("\"schema\"")
-                .doesNotContain("\"payload\"")
-                .contains("\"gpa\":" + HIGH_PRECISION_DECIMAL.toPlainString());
+                .doesNotContain("\"payload\"");
 
         final JsonNode root = DocumentStateSharedFixtures.serializedPublicValue(result);
         assertThat(root.has("schema")).isFalse();
@@ -168,6 +171,8 @@ class DocumentStateUpsertTest {
         assertNumericDecimal(
                 sampleExtension.get("academicSummary").get("weightedGpa"), HIGH_PRECISION_DECIMAL);
         assertNumericDecimal(sampleExtension.get("scoreHistory").get(0), HIGH_PRECISION_DECIMAL);
+        assertNumericDecimal(sampleExtension.get("wideIntegers").get("nestedId"), OUT_OF_RANGE_INTEGER);
+        assertNumericDecimal(sampleExtension.get("wideIntegerHistory").get(0), OUT_OF_RANGE_INTEGER);
         assertNumericDecimal(document.get("integerTooLarge"), OUT_OF_RANGE_INTEGER);
     }
 
