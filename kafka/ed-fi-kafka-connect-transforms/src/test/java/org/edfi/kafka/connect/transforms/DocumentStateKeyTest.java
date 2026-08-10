@@ -395,6 +395,5 @@ class DocumentStateKeyTest {
         final DocumentState.TransformationFailureException exception =
                 (DocumentState.TransformationFailureException) thrown;
         assertThat(exception.reason()).isEqualTo(expectedReason);
-        assertThat(exception.reason()).isNotEqualTo(DocumentState.FailureReason.OUTPUT_NOT_IMPLEMENTED);
     }
 }

@@ -8,8 +8,8 @@ package org.edfi.kafka.connect.transforms;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+import org.apache.kafka.common.config.AbstractConfig;
 import org.apache.kafka.common.config.ConfigDef;
-import org.apache.kafka.common.config.ConfigException;
 import org.apache.kafka.connect.connector.ConnectRecord;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.Struct;
@@ -25,7 +25,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
     public static final String POSTGRESQL_PROVIDER = "postgresql";
     public static final String SQLSERVER_PROVIDER = "sqlserver";
 
-    private static final String PROGRESS_TOPIC_SUFFIX = ".cdc-progress";
+    static final String PROGRESS_TOPIC_SUFFIX = ".cdc-progress";
     private static final String NATIVE_HEARTBEAT_TOPIC_PREFIX = "__debezium-heartbeat.";
     private static final String PROGRESS_KEY = "cdc-progress";
 
@@ -60,13 +60,13 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
 
     public static final ConfigDef CONFIG_DEF = new ConfigDef()
             .define(PROVIDER_CONFIG, ConfigDef.Type.STRING, ConfigDef.NO_DEFAULT_VALUE,
-                    DocumentState::validateProviderConfig, ConfigDef.Importance.HIGH,
+                    DocumentStateConfig::validateProviderConfig, ConfigDef.Importance.HIGH,
                     "Relational source provider. Must be exactly 'postgresql' or 'sqlserver'.")
             .define(TARGET_TOPIC_CONFIG, ConfigDef.Type.STRING, ConfigDef.NO_DEFAULT_VALUE,
-                    DocumentState::validateNonEmptyStringConfig, ConfigDef.Importance.HIGH,
+                    DocumentStateConfig::validateNonEmptyStringConfig, ConfigDef.Importance.HIGH,
                     "Public document topic.")
             .define(PROGRESS_TOPIC_CONFIG, ConfigDef.Type.STRING, ConfigDef.NO_DEFAULT_VALUE,
-                    DocumentState::validateNonEmptyStringConfig, ConfigDef.Importance.HIGH,
+                    DocumentStateConfig::validateNonEmptyStringConfig, ConfigDef.Importance.HIGH,
                     "Progress topic, derived as target.topic plus '.cdc-progress'.");
 
     private Settings settings;
@@ -78,37 +78,33 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
 
     @Override
     public void configure(final Map<String, ?> configs) {
-        final Provider provider = providerFrom(configs.get(PROVIDER_CONFIG));
-        final String targetTopic = requiredStringConfig(configs, TARGET_TOPIC_CONFIG);
-        final String progressTopic = requiredStringConfig(configs, PROGRESS_TOPIC_CONFIG);
+        DocumentStateConfig.validateRawProviderConfig(configs.get(PROVIDER_CONFIG));
 
-        if (!progressTopic.equals(targetTopic + PROGRESS_TOPIC_SUFFIX)) {
-            throw new ConfigException(PROGRESS_TOPIC_CONFIG, progressTopic,
-                    "must equal target.topic plus '" + PROGRESS_TOPIC_SUFFIX + "'");
-        }
-
+        final AbstractConfig config = new AbstractConfig(CONFIG_DEF, configs);
+        final Provider provider = Provider.fromConfigValue(config.getString(PROVIDER_CONFIG));
+        final String targetTopic = config.getString(TARGET_TOPIC_CONFIG);
+        final String progressTopic = config.getString(PROGRESS_TOPIC_CONFIG);
+        DocumentStateConfig.validateProgressTopic(targetTopic, progressTopic);
         this.settings = new Settings(provider, targetTopic, progressTopic);
     }
 
     @Override
     public R apply(final R record) {
         final ClassifiedRecord classifiedRecord = classify(record);
-        if (classifiedRecord.outputKind() == OutputKind.DROP) {
-            return null;
+        switch (classifiedRecord.outputKind()) {
+            case DROP:
+                return null;
+            case PUBLIC_UPSERT:
+                final ValidatedDocumentKey upsertKey = validatePublicDocumentKey(record, classifiedRecord);
+                return publicUpsert(record, classifiedRecord, upsertKey);
+            case PUBLIC_TOMBSTONE:
+                final ValidatedDocumentKey tombstoneKey = validatePublicDocumentKey(record, classifiedRecord);
+                return publicTombstone(record, classifiedRecord, tombstoneKey);
+            case PROGRESS:
+                return progress(record);
+            default:
+                throw new IllegalStateException("Unhandled output kind: " + classifiedRecord.outputKind());
         }
-        if (classifiedRecord.outputKind() == OutputKind.PUBLIC_UPSERT
-                || classifiedRecord.outputKind() == OutputKind.PUBLIC_TOMBSTONE) {
-            final ValidatedDocumentKey documentKey = validatePublicDocumentKey(record, classifiedRecord);
-            if (classifiedRecord.outputKind() == OutputKind.PUBLIC_UPSERT) {
-                return publicUpsert(record, classifiedRecord, documentKey);
-            }
-            return publicTombstone(record, classifiedRecord, documentKey);
-        }
-        if (classifiedRecord.outputKind() == OutputKind.PROGRESS) {
-            return progress(record);
-        }
-        throw transformationFailure(
-                FailureReason.OUTPUT_NOT_IMPLEMENTED, settings.provider(), record, classifiedRecord);
     }
 
     @Override
@@ -157,36 +153,6 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
 
     private R progress(final R record) {
         return DocumentStateJson.progressRecord(record, settings.progressTopic(), PROGRESS_KEY);
-    }
-
-    private static void validateProviderConfig(final String name, final Object value) {
-        if (!(POSTGRESQL_PROVIDER.equals(value) || SQLSERVER_PROVIDER.equals(value))) {
-            throw new ConfigException(name, value, "must be exactly 'postgresql' or 'sqlserver'");
-        }
-    }
-
-    private static void validateNonEmptyStringConfig(final String name, final Object value) {
-        if (!(value instanceof String) || ((String) value).isEmpty()) {
-            throw new ConfigException(name, value, "must be a non-empty string");
-        }
-    }
-
-    private static String requiredStringConfig(final Map<String, ?> configs, final String name) {
-        final Object value = configs.get(name);
-        if (!(value instanceof String) || ((String) value).isEmpty()) {
-            throw new ConfigException(name, value, "must be a non-empty string");
-        }
-        return (String) value;
-    }
-
-    private static Provider providerFrom(final Object provider) {
-        if (POSTGRESQL_PROVIDER.equals(provider)) {
-            return Provider.POSTGRESQL;
-        }
-        if (SQLSERVER_PROVIDER.equals(provider)) {
-            return Provider.SQLSERVER;
-        }
-        throw new ConfigException(PROVIDER_CONFIG, provider, "must be exactly 'postgresql' or 'sqlserver'");
     }
 
     private static boolean isNativeHeartbeat(final ConnectRecord<?> record) {
@@ -423,6 +389,16 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
         String configValue() {
             return configValue;
         }
+
+        static Provider fromConfigValue(final String configValue) {
+            if (POSTGRESQL_PROVIDER.equals(configValue)) {
+                return POSTGRESQL;
+            }
+            if (SQLSERVER_PROVIDER.equals(configValue)) {
+                return SQLSERVER;
+            }
+            throw new IllegalStateException("Unsupported provider config value: " + configValue);
+        }
     }
 
     public enum FailureReason {
@@ -451,8 +427,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
         UNAVAILABLE_DOCUMENT_JSON("unavailable DocumentJson"),
         DOCUMENT_JSON_HAS_ETAG("DocumentJson contains _etag"),
         INVALID_LAST_MODIFIED_AT("invalid LastModifiedAt"),
-        PUBLIC_DOCUMENT_INVARIANT_MISMATCH("public document invariant mismatch"),
-        OUTPUT_NOT_IMPLEMENTED("output transformation is not implemented");
+        PUBLIC_DOCUMENT_INVARIANT_MISMATCH("public document invariant mismatch");
 
         private final String description;
 
@@ -1061,7 +1036,8 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
 
         private boolean isDebeziumLogicalSchema(final Schema schema, final String schemaName) {
             return schemaName.equals(schema.name())
-                    && Integer.valueOf(DEBEZIUM_LOGICAL_SCHEMA_VERSION).equals(schema.version());
+                    && schema.version() != null
+                    && schema.version().intValue() == DEBEZIUM_LOGICAL_SCHEMA_VERSION;
         }
 
         private String normalizeDocumentUuid(
@@ -1164,7 +1140,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
             if (provider == Provider.SQLSERVER) {
                 return new DebeziumSourceAdapter(provider, SQLSERVER_SOURCE_SCHEMA_NAME);
             }
-            throw new ConfigException(PROVIDER_CONFIG, provider, "must be exactly 'postgresql' or 'sqlserver'");
+            throw new IllegalStateException("Unsupported provider: " + provider);
         }
     }
 }
