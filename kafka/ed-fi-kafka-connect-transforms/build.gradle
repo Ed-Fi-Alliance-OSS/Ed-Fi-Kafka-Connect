@@ -81,6 +81,7 @@ sourceSets {
 
 dependencies {
     compileOnly "org.apache.kafka:connect-api:$kafkaVersion"
+    compileOnly "org.apache.kafka:connect-json:$kafkaVersion"
     compileOnly "io.debezium:debezium-api:$debeziumVersion"
     // Jackson is provided by the Connect runtime; compile against it but do not bundle it.
     compileOnly "com.fasterxml.jackson.core:jackson-databind:$jacksonVersion"

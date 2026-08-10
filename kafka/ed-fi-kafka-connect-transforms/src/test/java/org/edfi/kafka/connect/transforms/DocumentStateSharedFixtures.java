@@ -14,7 +14,6 @@ import java.util.Map;
 
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.Struct;
-import org.apache.kafka.connect.json.JsonConverter;
 import org.apache.kafka.connect.source.SourceRecord;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
@@ -23,6 +22,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.edfi.kafka.connect.converters.DocumentStateJsonConverter;
 
 final class DocumentStateSharedFixtures {
 
@@ -68,7 +68,7 @@ final class DocumentStateSharedFixtures {
     }
 
     private static byte[] serializedPublicValueBytes(final SourceRecord record) {
-        final JsonConverter converter = new JsonConverter();
+        final DocumentStateJsonConverter converter = new DocumentStateJsonConverter();
         converter.configure(Map.of(
                 "schemas.enable", "false",
                 "decimal.format", "NUMERIC"), false);

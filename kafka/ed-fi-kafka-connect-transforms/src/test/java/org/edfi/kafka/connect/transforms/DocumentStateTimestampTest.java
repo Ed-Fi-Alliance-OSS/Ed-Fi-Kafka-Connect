@@ -5,6 +5,7 @@
 
 package org.edfi.kafka.connect.transforms;
 
+import java.io.IOException;
 import java.util.stream.Stream;
 
 import org.apache.kafka.connect.data.Schema;
@@ -13,6 +14,7 @@ import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.errors.DataException;
 import org.apache.kafka.connect.source.SourceRecord;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
@@ -26,7 +28,7 @@ class DocumentStateTimestampTest {
     void Given_Pinned_Timestamp_Should_Truncate_Fractional_Seconds(
             final String provider,
             final String sourceTimestamp,
-            final String expectedTimestamp) {
+            final String expectedTimestamp) throws IOException {
         final Struct after = DocumentStateTestRecords
                 .cacheRowBuilder(provider)
                 .field(DocumentStateTestRecords.LAST_MODIFIED_AT_FIELD,
@@ -40,8 +42,7 @@ class DocumentStateTimestampTest {
                 .configuredTransform(provider)
                 .apply(DocumentStateTestRecords.documentCacheRecord(provider, after));
 
-        final Struct value = outputValue(result);
-        assertThat(value.getString("lastModifiedAt")).isEqualTo(expectedTimestamp);
+        assertThat(outputValue(result).get("lastModifiedAt").asText()).isEqualTo(expectedTimestamp);
     }
 
     @ParameterizedTest
@@ -125,8 +126,8 @@ class DocumentStateTimestampTest {
                 + "\",\"_lastModifiedDate\":\"" + lastModifiedAt + "\"}";
     }
 
-    private static Struct outputValue(final SourceRecord result) {
-        return (Struct) result.value();
+    private static JsonNode outputValue(final SourceRecord result) throws IOException {
+        return DocumentStateSharedFixtures.serializedPublicValue(result);
     }
 
     private static void assertFailure(final Throwable thrown, final DocumentState.FailureReason expectedReason) {

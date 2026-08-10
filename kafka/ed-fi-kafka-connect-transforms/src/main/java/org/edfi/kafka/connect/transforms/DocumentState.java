@@ -159,7 +159,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
             final R record,
             final ClassifiedRecord classifiedRecord,
             final ValidatedDocumentKey documentKey) {
-        final DocumentStateJson.SchemaBackedValue value =
+        final DocumentStateJson.ByteBackedValue value =
                 settings.sourceAdapter().publicUpsertValue(record, classifiedRecord, documentKey);
         return DocumentStateJson.publicUpsertRecord(record, settings.targetTopic(), documentKey, value);
     }
@@ -818,7 +818,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
                     FailureReason.UNSUPPORTED_DOCUMENT_UUID_SHAPE);
         }
 
-        DocumentStateJson.SchemaBackedValue publicUpsertValue(
+        DocumentStateJson.ByteBackedValue publicUpsertValue(
                 final ConnectRecord<?> record,
                 final ClassifiedRecord classifiedRecord,
                 final ValidatedDocumentKey documentKey) {

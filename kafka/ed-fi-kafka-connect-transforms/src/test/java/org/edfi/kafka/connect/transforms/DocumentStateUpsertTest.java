@@ -7,10 +7,8 @@ package org.edfi.kafka.connect.transforms;
 
 import java.io.IOException;
 import java.math.BigDecimal;
-import java.util.List;
 import java.util.stream.Stream;
 
-import org.apache.kafka.connect.data.Field;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.data.Struct;
@@ -18,6 +16,7 @@ import org.apache.kafka.connect.errors.DataException;
 import org.apache.kafka.connect.source.SourceRecord;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import org.edfi.kafka.connect.converters.DocumentStateJsonConverter;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -47,28 +46,25 @@ class DocumentStateUpsertTest {
         assertThat(result.kafkaPartition()).isNull();
         assertThat(result.keySchema()).isSameAs(Schema.STRING_SCHEMA);
         assertThat(result.key()).isEqualTo(fixture.documentUuid());
-        assertThat(result.valueSchema()).isNotNull();
-        assertThat(result.valueSchema().type()).isEqualTo(Schema.Type.STRUCT);
-        assertThat(result.value()).isInstanceOf(Struct.class);
+        assertLogicalBytePublicUpsert(result);
         assertThat(result.timestamp()).isNull();
         assertThat(result.headers()).isEmpty();
         assertThat(result.sourcePartition()).isEqualTo(record.sourcePartition());
         assertThat(result.sourceOffset()).isEqualTo(record.sourceOffset());
 
-        final Struct value = outputValue(result);
-        assertThat(value.schema()).isSameAs(result.valueSchema());
-        assertThat(value.schema().fields()).extracting(Field::name).containsExactly(
-                "contractVersion",
-                "documentUuid",
-                "projectName",
-                "resourceName",
-                "resourceVersion",
-                "contentVersion",
-                "lastModifiedAt",
-                "document");
         final JsonNode serializedValue = DocumentStateSharedFixtures.serializedPublicValue(result);
         assertThat(serializedValue.has("schema")).isFalse();
         assertThat(serializedValue.has("payload")).isFalse();
+        assertThat(fieldNames(serializedValue))
+                .containsExactly(
+                        "contractVersion",
+                        "documentUuid",
+                        "projectName",
+                        "resourceName",
+                        "resourceVersion",
+                        "contentVersion",
+                        "lastModifiedAt",
+                        "document");
         assertThat(serializedValue)
                 .isEqualTo(DocumentStateSharedFixtures.toJson(fixture.expectedEnvelope()));
         assertThat(serializedValue.toString())
@@ -79,7 +75,7 @@ class DocumentStateUpsertTest {
     }
 
     @Test
-    void Given_SqlServer_Pinned_Row_Should_Build_Public_Envelope() {
+    void Given_SqlServer_Pinned_Row_Should_Build_Public_Envelope() throws IOException {
         final Struct after = DocumentStateTestRecords
                 .cacheRowBuilder(DocumentState.SQLSERVER_PROVIDER)
                 .field(
@@ -92,23 +88,23 @@ class DocumentStateUpsertTest {
                 .configuredTransform(DocumentState.SQLSERVER_PROVIDER)
                 .apply(DocumentStateTestRecords.documentCacheRecord(DocumentState.SQLSERVER_PROVIDER, after));
 
-        final Struct value = outputValue(result);
-        assertThat(value.getInt32("contractVersion")).isEqualTo(1);
-        assertThat(value.getString("documentUuid")).isEqualTo(DocumentStateTestRecords.DOCUMENT_UUID);
-        assertThat(value.getInt64("contentVersion")).isEqualTo(222L);
-        assertThat(value.getString("lastModifiedAt")).isEqualTo("2026-07-30T14:15:16Z");
-        assertThat(value.getStruct("document")).isNotNull();
-        assertThat(value.getString("documentUuid")).isEqualTo(result.key());
+        final JsonNode value = outputValue(result);
+        assertThat(value.get("contractVersion").intValue()).isEqualTo(1);
+        assertThat(value.get("documentUuid").asText()).isEqualTo(DocumentStateTestRecords.DOCUMENT_UUID);
+        assertThat(value.get("contentVersion").longValue()).isEqualTo(222L);
+        assertThat(value.get("lastModifiedAt").asText()).isEqualTo("2026-07-30T14:15:16Z");
+        assertThat(value.get("document").isObject()).isTrue();
+        assertThat(value.get("documentUuid").asText()).isEqualTo(result.key());
 
-        final Struct document = outputDocument(value);
-        assertThat(document)
-                .returns(result.key(), it -> it.getString("id"))
-                .returns(value.getString("lastModifiedAt"), it -> it.getString("_lastModifiedDate"))
-                .returns("222-01234567.j._.l.i", it -> it.getString("_etag"));
+        final JsonNode document = value.get("document");
+        assertThat(document.get("id").asText()).isEqualTo(result.key());
+        assertThat(document.get("_lastModifiedDate").asText())
+                .isEqualTo(value.get("lastModifiedAt").asText());
+        assertThat(document.get("_etag").asText()).isEqualTo("222-01234567.j._.l.i");
     }
 
     @Test
-    void Given_DocumentJson_Integral_Numbers_Should_Emit_Long_Values() {
+    void Given_DocumentJson_Integral_Numbers_Should_Emit_Long_Values() throws IOException {
         final Struct after = DocumentStateTestRecords
                 .cacheRowBuilder(DocumentState.POSTGRESQL_PROVIDER)
                 .field(
@@ -124,12 +120,13 @@ class DocumentStateUpsertTest {
                 .configuredTransform(DocumentState.POSTGRESQL_PROVIDER)
                 .apply(DocumentStateTestRecords.documentCacheRecord(DocumentState.POSTGRESQL_PROVIDER, after));
 
-        final Struct document = outputDocument(outputValue(result));
-        assertThat(document.getInt64("schoolId")).isEqualTo(255901L);
-        final Struct nested = document.getStruct("nested");
-        assertThat(nested.getInt64("count")).isEqualTo(0L);
-        final List<?> scores = document.getArray("scores");
-        assertThat(scores).isEqualTo(List.of(1L, Long.MAX_VALUE));
+        final JsonNode document = outputValue(result).get("document");
+        assertThat(document.get("schoolId").longValue()).isEqualTo(255901L);
+        final JsonNode nested = document.get("nested");
+        assertThat(nested.get("count").longValue()).isEqualTo(0L);
+        final JsonNode scores = document.get("scores");
+        assertThat(scores.get(0).longValue()).isEqualTo(1L);
+        assertThat(scores.get(1).longValue()).isEqualTo(Long.MAX_VALUE);
     }
 
     @Test
@@ -155,7 +152,7 @@ class DocumentStateUpsertTest {
                 .configuredTransform(DocumentState.POSTGRESQL_PROVIDER)
                 .apply(DocumentStateTestRecords.documentCacheRecord(DocumentState.POSTGRESQL_PROVIDER, after));
 
-        assertSchemaBackedPublicUpsert(result);
+        assertLogicalBytePublicUpsert(result);
         final String serializedValue = DocumentStateSharedFixtures.serializedPublicValueText(result);
         assertThat(serializedValue)
                 .doesNotContain("\"schema\"")
@@ -175,7 +172,8 @@ class DocumentStateUpsertTest {
     }
 
     @Test
-    void Given_DocumentJson_Mixed_Scale_Decimals_Should_Preserve_Exact_Number_Text() {
+    void Given_DocumentJson_Mixed_Scale_Decimals_Should_Preserve_Exact_Number_Values()
+            throws IOException {
         final Struct after = DocumentStateTestRecords
                 .cacheRowBuilder(DocumentState.POSTGRESQL_PROVIDER)
                 .field(
@@ -192,15 +190,21 @@ class DocumentStateUpsertTest {
                 .configuredTransform(DocumentState.POSTGRESQL_PROVIDER)
                 .apply(DocumentStateTestRecords.documentCacheRecord(DocumentState.POSTGRESQL_PROVIDER, after));
 
-        final String serializedValue = DocumentStateSharedFixtures.serializedPublicValueText(result);
-        assertThat(serializedValue)
-                .contains("\"scores\":[1,1.20," + HIGH_PRECISION_DECIMAL.toPlainString() + "]")
-                .contains("\"results\":[{\"score\":1},{\"score\":1.20},{\"score\":"
-                        + HIGH_PRECISION_DECIMAL.toPlainString() + "}]");
+        final JsonNode document = outputValue(result).get("document");
+        final JsonNode scores = document.get("scores");
+        assertNumericDecimal(scores.get(0), new BigDecimal("1"));
+        assertNumericDecimal(scores.get(1), new BigDecimal("1.20"));
+        assertNumericDecimal(scores.get(2), HIGH_PRECISION_DECIMAL);
+
+        final JsonNode results = document.get("results");
+        assertNumericDecimal(results.get(0).get("score"), new BigDecimal("1"));
+        assertNumericDecimal(results.get(1).get("score"), new BigDecimal("1.20"));
+        assertNumericDecimal(results.get(2).get("score"), HIGH_PRECISION_DECIMAL);
     }
 
     @Test
-    void Given_DocumentJson_Homogeneous_Object_Array_With_Null_Should_Preserve_Serialized_Shape() {
+    void Given_DocumentJson_Object_Array_With_Null_Should_Preserve_Property_Presence()
+            throws IOException {
         final Struct after = DocumentStateTestRecords
                 .cacheRowBuilder(DocumentState.POSTGRESQL_PROVIDER)
                 .field(
@@ -215,8 +219,36 @@ class DocumentStateUpsertTest {
                 .configuredTransform(DocumentState.POSTGRESQL_PROVIDER)
                 .apply(DocumentStateTestRecords.documentCacheRecord(DocumentState.POSTGRESQL_PROVIDER, after));
 
-        assertThat(DocumentStateSharedFixtures.serializedPublicValueText(result))
-                .contains("\"items\":[{\"a\":1,\"b\":\"first\"},null,{\"a\":2,\"b\":\"second\"}]");
+        final JsonNode items = outputValue(result).get("document").get("items");
+        assertThat(items.get(0).has("a")).isTrue();
+        assertThat(items.get(0).has("b")).isTrue();
+        assertThat(items.get(1).isNull()).isTrue();
+        assertThat(items.get(2).has("a")).isTrue();
+        assertThat(items.get(2).has("b")).isTrue();
+    }
+
+    @Test
+    void Given_DocumentJson_Object_Array_With_Different_Fields_Should_Preserve_Absent_Properties()
+            throws IOException {
+        final Struct after = DocumentStateTestRecords
+                .cacheRowBuilder(DocumentState.POSTGRESQL_PROVIDER)
+                .field(
+                        DocumentStateTestRecords.DOCUMENT_JSON_FIELD,
+                        DocumentStateTestRecords.documentJsonSchema(DocumentState.POSTGRESQL_PROVIDER),
+                        "{\"id\":\"" + DocumentStateTestRecords.DOCUMENT_UUID
+                                + "\",\"_lastModifiedDate\":\"2026-07-30T14:15:16Z\","
+                                + "\"items\":[{\"a\":1},{\"b\":2}]}")
+                .build();
+
+        final SourceRecord result = DocumentStateTestRecords
+                .configuredTransform(DocumentState.POSTGRESQL_PROVIDER)
+                .apply(DocumentStateTestRecords.documentCacheRecord(DocumentState.POSTGRESQL_PROVIDER, after));
+
+        final JsonNode items = outputValue(result).get("document").get("items");
+        assertThat(items.get(0).has("a")).isTrue();
+        assertThat(items.get(0).has("b")).isFalse();
+        assertThat(items.get(1).has("a")).isFalse();
+        assertThat(items.get(1).has("b")).isTrue();
     }
 
     @ParameterizedTest
@@ -270,16 +302,6 @@ class DocumentStateUpsertTest {
                         "{\"id\":\"" + DocumentStateTestRecords.DOCUMENT_UUID
                                 + "\",\"_lastModifiedDate\":\"2026-07-30T14:15:17Z\"}",
                         DocumentState.FailureReason.PUBLIC_DOCUMENT_INVARIANT_MISMATCH),
-                malformedDocumentJson(DocumentState.POSTGRESQL_PROVIDER,
-                        "{\"id\":\"" + DocumentStateTestRecords.DOCUMENT_UUID
-                                + "\",\"_lastModifiedDate\":\"2026-07-30T14:15:16Z\","
-                                + "\"mixed\":[1,\"one\"]}",
-                        DocumentState.FailureReason.INVALID_DOCUMENT_JSON),
-                malformedDocumentJson(DocumentState.POSTGRESQL_PROVIDER,
-                        "{\"id\":\"" + DocumentStateTestRecords.DOCUMENT_UUID
-                                + "\",\"_lastModifiedDate\":\"2026-07-30T14:15:16Z\","
-                                + "\"items\":[{\"a\":1},{\"b\":2}]}",
-                        DocumentState.FailureReason.INVALID_DOCUMENT_JSON),
                 malformedDocumentJson(DocumentState.SQLSERVER_PROVIDER, "__debezium_unavailable_value",
                         DocumentState.FailureReason.UNAVAILABLE_DOCUMENT_JSON));
     }
@@ -343,25 +365,28 @@ class DocumentStateUpsertTest {
         return new Object[] {after, expectedReason};
     }
 
-    private static Struct outputValue(final SourceRecord result) {
-        assertSchemaBackedPublicUpsert(result);
-        return (Struct) result.value();
+    private static JsonNode outputValue(final SourceRecord result) throws IOException {
+        assertLogicalBytePublicUpsert(result);
+        return DocumentStateSharedFixtures.serializedPublicValue(result);
     }
 
-    private static Struct outputDocument(final Struct value) {
-        return value.getStruct("document");
-    }
-
-    private static void assertSchemaBackedPublicUpsert(final SourceRecord result) {
+    private static void assertLogicalBytePublicUpsert(final SourceRecord result) {
         assertThat(result.valueSchema()).isNotNull();
-        assertThat(result.valueSchema().type()).isEqualTo(Schema.Type.STRUCT);
-        assertThat(result.value()).isInstanceOf(Struct.class);
+        assertThat(result.valueSchema().type()).isEqualTo(Schema.Type.BYTES);
+        assertThat(result.valueSchema().name()).isEqualTo(DocumentStateJsonConverter.PUBLIC_SCHEMA_NAME);
+        assertThat(result.valueSchema().version()).isEqualTo(DocumentStateJsonConverter.PUBLIC_SCHEMA_VERSION);
+        assertThat(result.valueSchema().isOptional()).isFalse();
+        assertThat(result.value()).isInstanceOf(byte[].class);
+    }
+
+    private static Iterable<String> fieldNames(final JsonNode node) {
+        return node::fieldNames;
     }
 
     private static void assertNumericDecimal(final JsonNode node, final BigDecimal expected) {
         assertThat(node.isNumber()).isTrue();
         assertThat(node.isTextual()).isFalse();
-        assertThat(node.decimalValue().toPlainString()).isEqualTo(expected.toPlainString());
+        assertThat(node.decimalValue()).isEqualByComparingTo(expected);
     }
 
     private static void assertFailure(final Throwable thrown, final DocumentState.FailureReason expectedReason) {

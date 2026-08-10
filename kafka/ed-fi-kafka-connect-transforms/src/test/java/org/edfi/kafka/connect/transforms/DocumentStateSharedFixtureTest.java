@@ -12,9 +12,9 @@ import java.util.stream.Stream;
 
 import org.apache.kafka.connect.data.Field;
 import org.apache.kafka.connect.data.Schema;
-import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.source.SourceRecord;
 
+import org.edfi.kafka.connect.converters.DocumentStateJsonConverter;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -45,8 +45,7 @@ class DocumentStateSharedFixtureTest {
         assertThat(result.keySchema()).isSameAs(Schema.STRING_SCHEMA);
         assertThat(result.key()).isEqualTo(fixture.documentUuid());
         assertThat(result.valueSchema()).isNotNull();
-        assertThat(result.valueSchema().type()).isEqualTo(Schema.Type.STRUCT);
-        assertThat(result.value()).isInstanceOf(Struct.class);
+        assertPublicJsonBytes(result);
         assertThat(result.timestamp()).isNull();
         assertThat(result.headers()).isEmpty();
         assertThat(DocumentStateSharedFixtures.serializedPublicValue(result))
@@ -131,6 +130,14 @@ class DocumentStateSharedFixtureTest {
         assertThat(field.schema().type()).as(fieldName + " type").isEqualTo(schemaType);
         assertThat(field.schema().isOptional()).as(fieldName + " optional").isFalse();
         assertThat(field.schema().name()).as(fieldName + " schema name").isEqualTo(schemaName);
+    }
+
+    private static void assertPublicJsonBytes(final SourceRecord result) {
+        assertThat(result.valueSchema().type()).isEqualTo(Schema.Type.BYTES);
+        assertThat(result.valueSchema().name()).isEqualTo(DocumentStateJsonConverter.PUBLIC_SCHEMA_NAME);
+        assertThat(result.valueSchema().version()).isEqualTo(DocumentStateJsonConverter.PUBLIC_SCHEMA_VERSION);
+        assertThat(result.valueSchema().isOptional()).isFalse();
+        assertThat(result.value()).isInstanceOf(byte[].class);
     }
 
     private static String sourceSchemaName(final String provider) {
