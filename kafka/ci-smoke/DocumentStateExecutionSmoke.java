@@ -6,6 +6,8 @@
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Map;
 
 import org.apache.kafka.connect.data.Schema;
@@ -14,7 +16,6 @@ import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.header.ConnectHeaders;
 import org.apache.kafka.connect.header.Header;
 import org.apache.kafka.connect.header.Headers;
-import org.apache.kafka.connect.json.JsonConverter;
 import org.apache.kafka.connect.source.SourceRecord;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
@@ -23,6 +24,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 
+import org.edfi.kafka.connect.converters.DocumentStateJsonConverter;
 import org.edfi.kafka.connect.transforms.DocumentState;
 
 // CI execution smoke, run inside the built Ed-Fi image by .github/workflows/on-pullrequest.yml.
@@ -38,10 +40,18 @@ public final class DocumentStateExecutionSmoke {
     private static final String POSTGRESQL_UUID_SCHEMA = "io.debezium.data.Uuid";
     private static final String POSTGRESQL_JSON_SCHEMA = "io.debezium.data.Json";
     private static final String POSTGRESQL_TIMESTAMP_SCHEMA = "io.debezium.time.ZonedTimestamp";
+    private static final String VALUE_CONVERTER_CONFIG = "value.converter";
+    private static final String VALUE_CONVERTER_SCHEMAS_CONFIG = "value.converter.schemas.enable";
+    private static final String VALUE_CONVERTER_DECIMAL_CONFIG = "value.converter.decimal.format";
+    private static final Map<String, String> CONNECTOR_VALUE_CONVERTER_CONFIG = Map.of(
+            VALUE_CONVERTER_CONFIG, DocumentStateJsonConverter.class.getName(),
+            VALUE_CONVERTER_SCHEMAS_CONFIG, "false",
+            VALUE_CONVERTER_DECIMAL_CONFIG, "NUMERIC");
     private static final BigDecimal HIGH_PRECISION_DECIMAL =
             new BigDecimal("3.141592653589793238462643383279");
     private static final ObjectMapper MAPPER = JsonMapper.builder()
             .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+            .enable(DeserializationFeature.USE_BIG_INTEGER_FOR_INTS)
             .nodeFactory(JsonNodeFactory.withExactBigDecimals(true))
             .build();
 
@@ -49,19 +59,25 @@ public final class DocumentStateExecutionSmoke {
     }
 
     public static void main(final String[] args) throws IOException {
-        smokePublicUpsert();
+        if (args.length != 1) {
+            fail("usage: DocumentStateExecutionSmoke <school-address-property-absence fixture directory>");
+        }
+
+        final SharedCacheFixture sharedFixture = sharedCacheFixture(Path.of(args[0]));
+        smokePublicUpsert(sharedFixture);
         smokePublicUpsertDecimalSerialization();
         smokePublicTombstone();
         smokeProgressRecord();
         smokeMalformedRetainedRecordFailure();
-        System.out.println("OK: DocumentState executed representative records on the image runtime classpath.");
+        System.out.println("OK: DocumentState and DocumentStateJsonConverter executed representative records "
+                + "on the image runtime classpath.");
     }
 
-    private static void smokePublicUpsert() {
+    private static void smokePublicUpsert(final SharedCacheFixture sharedFixture) throws IOException {
         final DocumentState<SourceRecord> transform = configuredTransform();
         try {
             final SourceRecord record = documentCacheRecord(
-                    cacheRow(validDocumentJson(DOCUMENT_UUID)), 987L,
+                    sharedFixture,
                     new ConnectHeaders().addString("source-header", "stripped"));
 
             final SourceRecord out = transform.apply(record);
@@ -69,26 +85,29 @@ public final class DocumentStateExecutionSmoke {
             expect(TARGET_TOPIC.equals(out.topic()), "upsert topic = " + out.topic());
             expect(out.kafkaPartition() == null, "upsert partition");
             expect(out.keySchema() == Schema.STRING_SCHEMA, "upsert key schema");
-            expect(DOCUMENT_UUID.equals(out.key()), "upsert key = " + out.key());
-            expect(out.valueSchema() != null, "upsert value schema");
-            expect(out.valueSchema().type() == Schema.Type.STRUCT, "upsert value schema type");
-            expect(out.value() instanceof Struct, "upsert value");
+            expect(sharedFixture.documentUuid().equals(out.key()), "upsert key = " + out.key());
+            expectPublicValueSchema(out, "upsert");
             expect(out.timestamp() == null, "upsert timestamp");
             expect(!out.headers().iterator().hasNext(), "upsert headers stripped");
             expect(record.sourcePartition().equals(out.sourcePartition()), "upsert source partition");
             expect(record.sourceOffset().equals(out.sourceOffset()), "upsert source offset");
 
-            final Struct value = (Struct) out.value();
-            expect(Integer.valueOf(1).equals(value.getInt32("contractVersion")), "upsert contractVersion");
-            expect(DOCUMENT_UUID.equals(value.getString("documentUuid")), "upsert documentUuid");
-            expect(Long.valueOf(222L).equals(value.getInt64("contentVersion")), "upsert contentVersion");
-            expect("2026-07-30T14:15:16Z".equals(value.getString("lastModifiedAt")), "upsert lastModifiedAt");
+            final byte[] serialized = serializedPublicValue(out);
+            final String serializedText = new String(serialized, StandardCharsets.UTF_8);
+            expect(!serializedText.contains("\"schema\""), "upsert has no schema wrapper");
+            expect(!serializedText.contains("\"payload\""), "upsert has no payload wrapper");
+            expect(!serializedText.startsWith("\""), "upsert is not a JSON-quoted or Base64 whole value");
 
-            final Struct document = value.getStruct("document");
-            expect(DOCUMENT_UUID.equals(document.getString("id")), "upsert document.id");
-            expect("222-01234567.j._.l.i".equals(document.getString("_etag")), "upsert document._etag");
-            expect("2026-07-30T14:15:16Z".equals(document.getString("_lastModifiedDate")),
-                    "upsert document._lastModifiedDate");
+            final JsonNode root = MAPPER.readTree(serialized);
+            expect(root.isObject(), "upsert root is a JSON object");
+            expectEnvelope(root, sharedFixture, "upsert");
+
+            final JsonNode document = root.get("document");
+            expect(sharedFixture.expectedPublicDocument().equals(document), "upsert shared public document");
+            final JsonNode addresses = document.get("addresses");
+            expect(addresses != null && addresses.isArray() && addresses.size() == 2, "upsert addresses");
+            expect(addresses.get(0).has("addressTypeDescriptor"), "upsert first address descriptor");
+            expect(!addresses.get(1).has("addressTypeDescriptor"), "upsert second address descriptor absent");
         } finally {
             transform.close();
         }
@@ -106,19 +125,19 @@ public final class DocumentStateExecutionSmoke {
             expect(TARGET_TOPIC.equals(out.topic()), "decimal upsert topic = " + out.topic());
             expect(out.keySchema() == Schema.STRING_SCHEMA, "decimal upsert key schema");
             expect(DOCUMENT_UUID.equals(out.key()), "decimal upsert key = " + out.key());
-            expect(out.valueSchema() != null, "decimal upsert value schema");
-            expect(out.valueSchema().type() == Schema.Type.STRUCT, "decimal upsert value schema type");
-            expect(out.value() instanceof Struct, "decimal upsert value");
+            expectPublicValueSchema(out, "decimal upsert");
 
             final byte[] serialized = serializedPublicValue(out);
             final String serializedText = new String(serialized, StandardCharsets.UTF_8);
             expect(!serializedText.contains("\"schema\""), "decimal upsert has no schema wrapper");
             expect(!serializedText.contains("\"payload\""), "decimal upsert has no payload wrapper");
+            expect(!serializedText.startsWith("\""), "decimal upsert is not a JSON-quoted whole value");
             expect(serializedText.contains("\"gpa\":" + HIGH_PRECISION_DECIMAL.toPlainString()),
                     "decimal upsert gpa is unquoted in " + serializedText);
             expect(!serializedText.contains("\"gpa\":\""), "decimal upsert gpa is not a string");
 
             final JsonNode root = MAPPER.readTree(serialized);
+            expect(root.isObject(), "decimal upsert root is a JSON object");
             expect(!root.has("schema"), "decimal upsert parsed has no schema wrapper");
             expect(!root.has("payload"), "decimal upsert parsed has no payload wrapper");
             final JsonNode sampleExtension = root.get("document").get("_ext").get("sample");
@@ -151,6 +170,7 @@ public final class DocumentStateExecutionSmoke {
             expect(DOCUMENT_UUID.equals(out.key()), "tombstone key = " + out.key());
             expect(out.valueSchema() == null, "tombstone value schema");
             expect(out.value() == null, "tombstone value");
+            expect(serializedPublicValue(out) == null, "tombstone serialized null");
             expect(out.timestamp() == null, "tombstone timestamp");
             expect(!out.headers().iterator().hasNext(), "tombstone headers stripped");
             expect(record.sourcePartition().equals(out.sourcePartition()), "tombstone source partition");
@@ -166,15 +186,18 @@ public final class DocumentStateExecutionSmoke {
             final Headers headers = new ConnectHeaders().addString("source-header", "kept");
             final SourceRecord record = new SourceRecord(
                     sourcePartition(), sourceOffset(), "__debezium-heartbeat.dms", null,
-                    Schema.STRING_SCHEMA, "ignored-source-key", null, null, 321L, headers);
+                    Schema.STRING_SCHEMA, "ignored-source-key", Schema.STRING_SCHEMA, "heartbeat", 321L,
+                    headers);
 
             final SourceRecord out = transform.apply(record);
 
             expect(PROGRESS_TOPIC.equals(out.topic()), "progress topic = " + out.topic());
             expect(out.keySchema() == Schema.STRING_SCHEMA, "progress key schema");
             expect("cdc-progress".equals(out.key()), "progress key = " + out.key());
-            expect(out.valueSchema() == null, "progress value schema");
-            expect(out.value() == null, "progress value");
+            expect(out.valueSchema() == Schema.STRING_SCHEMA, "progress value schema");
+            expect("heartbeat".equals(out.value()), "progress value");
+            expect("\"heartbeat\"".equals(new String(serializedPublicValue(out), StandardCharsets.UTF_8)),
+                    "progress serialized through JsonConverter delegate");
             expect(Long.valueOf(321L).equals(out.timestamp()), "progress timestamp");
             final Header sourceHeader = out.headers().lastWithName("source-header");
             expect(sourceHeader != null, "progress source-header present");
@@ -216,7 +239,22 @@ public final class DocumentStateExecutionSmoke {
             final Struct after,
             final Long timestamp,
             final Headers headers) {
-        return relationalRecord("DocumentCache", "c", keyStruct(DOCUMENT_UUID), "after", after, timestamp, headers);
+        return documentCacheRecord(DOCUMENT_UUID, after, timestamp, headers);
+    }
+
+    private static SourceRecord documentCacheRecord(
+            final SharedCacheFixture sharedFixture,
+            final Headers headers) {
+        return documentCacheRecord(sharedFixture.documentUuid(), sharedFixture.cacheRow(), 987L, headers);
+    }
+
+    private static SourceRecord documentCacheRecord(
+            final String documentUuid,
+            final Struct after,
+            final Long timestamp,
+            final Headers headers) {
+        return relationalRecord("DocumentCache", "c", keyStruct(documentUuid), "after", after, timestamp,
+                headers);
     }
 
     private static SourceRecord documentDeleteRecord(
@@ -260,6 +298,26 @@ public final class DocumentStateExecutionSmoke {
     }
 
     private static Struct cacheRow(final String documentJson) {
+        return cacheRow(
+                DOCUMENT_UUID,
+                "Ed-Fi",
+                "StudentSchoolAssociation",
+                "1.0",
+                222L,
+                "222-01234567.j._.l.i",
+                "2026-07-30T14:15:16.123456Z",
+                documentJson);
+    }
+
+    private static Struct cacheRow(
+            final String documentUuid,
+            final String projectName,
+            final String resourceName,
+            final String resourceVersion,
+            final long contentVersion,
+            final String streamEtag,
+            final String lastModifiedAt,
+            final String documentJson) {
         final Schema schema = SchemaBuilder.struct()
                 .name("server.dms." + POSTGRESQL_SOURCE_SCHEMA + ".DocumentCache.Value")
                 .field("DocumentUuid", postgresqlUuidSchema())
@@ -272,13 +330,13 @@ public final class DocumentStateExecutionSmoke {
                 .field("DocumentJson", SchemaBuilder.string().name(POSTGRESQL_JSON_SCHEMA).build())
                 .build();
         return new Struct(schema)
-                .put("DocumentUuid", DOCUMENT_UUID)
-                .put("ProjectName", "Ed-Fi")
-                .put("ResourceName", "StudentSchoolAssociation")
-                .put("ResourceVersion", "1.0")
-                .put("ContentVersion", 222L)
-                .put("StreamEtag", "222-01234567.j._.l.i")
-                .put("LastModifiedAt", "2026-07-30T14:15:16.123456Z")
+                .put("DocumentUuid", documentUuid)
+                .put("ProjectName", projectName)
+                .put("ResourceName", resourceName)
+                .put("ResourceVersion", resourceVersion)
+                .put("ContentVersion", contentVersion)
+                .put("StreamEtag", streamEtag)
+                .put("LastModifiedAt", lastModifiedAt)
                 .put("DocumentJson", documentJson);
     }
 
@@ -316,11 +374,6 @@ public final class DocumentStateExecutionSmoke {
         return Map.of("position", 1L);
     }
 
-    private static String validDocumentJson(final String documentUuid) {
-        return "{\"id\":\"" + documentUuid
-                + "\",\"_lastModifiedDate\":\"2026-07-30T14:15:16Z\",\"schoolId\":255901}";
-    }
-
     private static String decimalDocumentJson(final String documentUuid) {
         return "{\"id\":\"" + documentUuid
                 + "\",\"_lastModifiedDate\":\"2026-07-30T14:15:16Z\","
@@ -334,11 +387,71 @@ public final class DocumentStateExecutionSmoke {
     }
 
     private static byte[] serializedPublicValue(final SourceRecord record) {
-        final JsonConverter converter = new JsonConverter();
+        expect(DocumentStateJsonConverter.class.getName().equals(
+                        CONNECTOR_VALUE_CONVERTER_CONFIG.get(VALUE_CONVERTER_CONFIG)),
+                "value.converter config");
+        expect("false".equals(CONNECTOR_VALUE_CONVERTER_CONFIG.get(VALUE_CONVERTER_SCHEMAS_CONFIG)),
+                "value.converter.schemas.enable config");
+        expect("NUMERIC".equals(CONNECTOR_VALUE_CONVERTER_CONFIG.get(VALUE_CONVERTER_DECIMAL_CONFIG)),
+                "value.converter.decimal.format config");
+
+        final DocumentStateJsonConverter converter = new DocumentStateJsonConverter();
         converter.configure(Map.of(
-                "schemas.enable", "false",
-                "decimal.format", "NUMERIC"), false);
+                "schemas.enable", CONNECTOR_VALUE_CONVERTER_CONFIG.get(VALUE_CONVERTER_SCHEMAS_CONFIG),
+                "decimal.format", CONNECTOR_VALUE_CONVERTER_CONFIG.get(VALUE_CONVERTER_DECIMAL_CONFIG)),
+                false);
         return converter.fromConnectData(record.topic(), record.valueSchema(), record.value());
+    }
+
+    private static void expectPublicValueSchema(final SourceRecord record, final String detail) {
+        expect(record.valueSchema() != null, detail + " value schema");
+        expect(record.valueSchema().type() == Schema.Type.BYTES, detail + " value schema type");
+        expect(DocumentStateJsonConverter.PUBLIC_SCHEMA_NAME.equals(record.valueSchema().name()),
+                detail + " value schema name");
+        expect(Integer.valueOf(DocumentStateJsonConverter.PUBLIC_SCHEMA_VERSION).equals(
+                        record.valueSchema().version()),
+                detail + " value schema version");
+        expect(record.value() instanceof byte[], detail + " value bytes");
+    }
+
+    private static void expectEnvelope(
+            final JsonNode root,
+            final SharedCacheFixture sharedFixture,
+            final String detail) {
+        expect(root.get("contractVersion").isIntegralNumber() && root.get("contractVersion").intValue() == 1,
+                detail + " contractVersion");
+        expect(sharedFixture.documentUuid().equals(root.get("documentUuid").textValue()),
+                detail + " documentUuid");
+        expect(sharedFixture.projectName().equals(root.get("projectName").textValue()),
+                detail + " projectName");
+        expect(sharedFixture.resourceName().equals(root.get("resourceName").textValue()),
+                detail + " resourceName");
+        expect(sharedFixture.resourceVersion().equals(root.get("resourceVersion").textValue()),
+                detail + " resourceVersion");
+        expect(root.get("contentVersion").isIntegralNumber()
+                        && root.get("contentVersion").longValue() == sharedFixture.contentVersion(),
+                detail + " contentVersion");
+        expect(sharedFixture.normalizedLastModifiedAt().equals(root.get("lastModifiedAt").textValue()),
+                detail + " lastModifiedAt");
+    }
+
+    private static SharedCacheFixture sharedCacheFixture(final Path fixtureDirectory) throws IOException {
+        final JsonNode cacheRow = MAPPER.readTree(Files.readString(
+                fixtureDirectory.resolve("expected-cache-row.json"), StandardCharsets.UTF_8));
+        final JsonNode expectedPublicDocument = MAPPER.readTree(Files.readString(
+                fixtureDirectory.resolve("expected-public-cdc-document.json"), StandardCharsets.UTF_8))
+                .get("document");
+        expect(expectedPublicDocument != null && expectedPublicDocument.isObject(), "shared fixture document");
+        return new SharedCacheFixture(
+                cacheRow.get("documentUuid").textValue(),
+                cacheRow.get("projectName").textValue(),
+                cacheRow.get("resourceName").textValue(),
+                cacheRow.get("resourceVersion").textValue(),
+                cacheRow.get("contentVersion").longValue(),
+                cacheRow.get("streamEtag").textValue(),
+                cacheRow.get("lastModifiedAt").textValue(),
+                MAPPER.writeValueAsString(cacheRow.get("documentJson")),
+                expectedPublicDocument);
     }
 
     private static void expectNumericDecimal(
@@ -360,5 +473,74 @@ public final class DocumentStateExecutionSmoke {
 
     private static void fail(final String detail) {
         throw new IllegalStateException("DocumentState execution smoke failed: " + detail);
+    }
+
+    private static final class SharedCacheFixture {
+        private final String documentUuid;
+        private final String projectName;
+        private final String resourceName;
+        private final String resourceVersion;
+        private final long contentVersion;
+        private final JsonNode expectedPublicDocument;
+        private final Struct cacheRow;
+
+        SharedCacheFixture(
+                final String documentUuid,
+                final String projectName,
+                final String resourceName,
+                final String resourceVersion,
+                final long contentVersion,
+                final String streamEtag,
+                final String lastModifiedAt,
+                final String documentJson,
+                final JsonNode expectedPublicDocument) {
+            this.documentUuid = documentUuid;
+            this.projectName = projectName;
+            this.resourceName = resourceName;
+            this.resourceVersion = resourceVersion;
+            this.contentVersion = contentVersion;
+            this.expectedPublicDocument = expectedPublicDocument;
+            this.cacheRow = DocumentStateExecutionSmoke.cacheRow(
+                    documentUuid,
+                    projectName,
+                    resourceName,
+                    resourceVersion,
+                    contentVersion,
+                    streamEtag,
+                    lastModifiedAt,
+                    documentJson);
+        }
+
+        String documentUuid() {
+            return documentUuid;
+        }
+
+        String projectName() {
+            return projectName;
+        }
+
+        String resourceName() {
+            return resourceName;
+        }
+
+        String resourceVersion() {
+            return resourceVersion;
+        }
+
+        long contentVersion() {
+            return contentVersion;
+        }
+
+        String normalizedLastModifiedAt() {
+            return expectedPublicDocument.get("_lastModifiedDate").textValue();
+        }
+
+        JsonNode expectedPublicDocument() {
+            return expectedPublicDocument;
+        }
+
+        Struct cacheRow() {
+            return cacheRow;
+        }
     }
 }

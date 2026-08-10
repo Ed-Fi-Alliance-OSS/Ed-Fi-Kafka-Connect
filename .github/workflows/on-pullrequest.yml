@@ -145,6 +145,18 @@ jobs:
           docker cp smt-extract:/kafka/libs ./image-libs
           docker rm smt-extract
 
+      - name: Verify DocumentState transform and converter ship in the same image artifact
+        run: |
+          set -euo pipefail
+          jar_path=$(find smt-plugin -maxdepth 1 -name '*.jar' | head -n1)
+          if [ -z "$jar_path" ]; then
+            echo "::error::No Ed-Fi Kafka Connect transform jar found in the image plugin directory"
+            exit 1
+          fi
+          jar tf "$jar_path" | grep -Fx org/edfi/kafka/connect/transforms/DocumentState.class
+          jar tf "$jar_path" | grep -Fx org/edfi/kafka/connect/converters/DocumentStateJsonConverter.class
+          echo "OK: DocumentState and DocumentStateJsonConverter are packaged together in $jar_path."
+
       # The load checks above stop at linking. Jackson is provided by the Connect runtime
       # (compileOnly in build.gradle, not bundled in the plugin jar) and is first resolved when
       # the transforms process a record, so a missing or incompatible runtime Jackson passes
@@ -159,6 +171,12 @@ jobs:
             kafka/ci-smoke/ExpandJsonExecutionSmoke.java \
             kafka/ci-smoke/DocumentStateExecutionSmoke.java
 
+      - name: Checkout DMS shared document fixtures
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: Ed-Fi-Alliance-OSS/Data-Management-Service
+          path: dms
+
       - name: Run the ExpandJson execution smoke inside the Kafka Connect 4.3 image
         run: |
           set -euo pipefail
@@ -170,10 +188,13 @@ jobs:
       - name: Run the DocumentState execution smoke inside the Kafka Connect 4.3 image
         run: |
           set -euo pipefail
-          docker run --rm -v "$PWD/smoke-classes:/smoke:ro" --entrypoint java \
+          docker run --rm \
+            -v "$PWD/smoke-classes:/smoke:ro" \
+            -v "$PWD/dms/src/dms/backend/Fixtures/document-cache/materialized-documents/school-address-property-absence:/fixtures/school-address-property-absence:ro" \
+            --entrypoint java \
             ed-fi-kafka-connect:smoke \
             -cp '/smoke:/kafka/libs/*:/kafka/connect/ed-fi-kafka-connect-transforms/*' \
-            DocumentStateExecutionSmoke
+            DocumentStateExecutionSmoke /fixtures/school-address-property-absence
 
   build:
     name: Build
