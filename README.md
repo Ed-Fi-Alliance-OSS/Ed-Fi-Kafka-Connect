@@ -94,12 +94,19 @@ version `1` and a matching `byte[]` containing the complete final public JSON ob
 these top-level connector settings for the relational document-state connector:
 
 ```properties
+message.key.columns=dms.Document:DocumentUuid;dms.DocumentCache:DocumentUuid
 key.converter=org.apache.kafka.connect.storage.StringConverter
 value.converter=org.edfi.kafka.connect.converters.DocumentStateJsonConverter
 value.converter.schemas.enable=false
 value.converter.decimal.format=NUMERIC
 tombstones.on.delete=false
 ```
+
+`message.key.columns` is required for both providers so Debezium keys `dms.Document`
+and `dms.DocumentCache` records by `DocumentUuid` instead of their relational primary
+keys. Use the exact fully qualified table identifiers emitted by DMS provider setup if
+they differ from the example above. This does not change table primary keys, and it does
+not require a `DocumentCache.DocumentUuid` index.
 
 `StringConverter` is required for both public document keys and internal progress keys, so
 Kafka key bytes are plain UTF-8 strings with no JSON quoting and no Kafka Connect
