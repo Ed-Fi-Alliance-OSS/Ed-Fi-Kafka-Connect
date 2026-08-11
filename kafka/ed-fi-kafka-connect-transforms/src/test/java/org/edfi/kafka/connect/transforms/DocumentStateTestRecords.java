@@ -334,11 +334,6 @@ final class DocumentStateTestRecords {
             return this;
         }
 
-        CacheRowBuilder value(final String fieldName, final Object value) {
-            values.put(fieldName, value);
-            return this;
-        }
-
         Struct build() {
             final SchemaBuilder builder = SchemaBuilder.struct()
                     .name("server.dms." + sourceSchemaName(provider) + ".DocumentCache.Value")

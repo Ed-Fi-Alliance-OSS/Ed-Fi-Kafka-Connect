@@ -65,7 +65,6 @@ final class DocumentStateSharedFixtures {
                 readRequiredObject(publicDocumentPath, "shared DMS expected public CDC document");
         final JsonNode expectedDocument = requiredObject(publicDocument, DOCUMENT_FIELD, publicDocumentPath);
         return new SharedFixture(
-                caseName,
                 new CacheRowData(cacheRow, cacheRowPath),
                 expectedDocument,
                 requiredText(expectedDocument, LAST_MODIFIED_DATE_FIELD, publicDocumentPath));
@@ -202,34 +201,23 @@ final class DocumentStateSharedFixtures {
     }
 
     static final class SharedFixture {
-        private final String caseName;
         private final CacheRowData cacheRow;
         private final JsonNode expectedDocument;
         private final String expectedLastModifiedAt;
         private final JsonNode expectedEnvelope;
 
         private SharedFixture(
-                final String caseName,
                 final CacheRowData cacheRow,
                 final JsonNode expectedDocument,
                 final String expectedLastModifiedAt) {
-            this.caseName = caseName;
             this.cacheRow = cacheRow;
             this.expectedDocument = expectedDocument;
             this.expectedLastModifiedAt = expectedLastModifiedAt;
             this.expectedEnvelope = createExpectedEnvelope();
         }
 
-        String caseName() {
-            return caseName;
-        }
-
         String documentUuid() {
             return cacheRow.documentUuid;
-        }
-
-        JsonNode cacheRow() {
-            return cacheRow.json;
         }
 
         JsonNode expectedDocument() {

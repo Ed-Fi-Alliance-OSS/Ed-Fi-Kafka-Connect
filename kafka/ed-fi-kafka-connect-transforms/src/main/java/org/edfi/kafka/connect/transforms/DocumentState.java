@@ -762,6 +762,9 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
             if (!keySchema.equals(keyStruct.schema())) {
                 throw classifiedFailure(FailureReason.UNSUPPORTED_DOCUMENT_KEY_SHAPE, record, classifiedRecord);
             }
+            if (keySchema.field(DOCUMENT_UUID_FIELD) != null && keySchema.fields().size() != 1) {
+                throw classifiedFailure(FailureReason.UNSUPPORTED_DOCUMENT_KEY_SHAPE, record, classifiedRecord);
+            }
 
             final String documentUuid = documentUuid(keyStruct, record, classifiedRecord,
                     FailureReason.UNSUPPORTED_DOCUMENT_KEY_SHAPE);

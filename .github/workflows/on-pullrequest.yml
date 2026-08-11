@@ -256,9 +256,6 @@ jobs:
 
       - name: Build with Gradle
         run: ./gradlew clean build -PedfiDmsMaterializedDocumentFixtureRoot=${{ github.workspace }}/dms/src/dms/backend/Fixtures/document-cache/materialized-documents
-
-      - name: Run tests with Gradle
-        run: ./gradlew test -PedfiDmsMaterializedDocumentFixtureRoot=${{ github.workspace }}/dms/src/dms/backend/Fixtures/document-cache/materialized-documents
       
       - name: Upload Test Results
         if: always()

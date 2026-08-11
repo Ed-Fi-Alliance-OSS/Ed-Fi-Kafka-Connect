@@ -188,7 +188,9 @@ class DocumentStateKeyTest {
                 invalidKey(
                         DocumentState.POSTGRESQL_PROVIDER,
                         keyStructSchemaWithExtraField(DocumentState.POSTGRESQL_PROVIDER),
-                        keyStruct(DocumentState.POSTGRESQL_PROVIDER, DOCUMENT_UUID),
+                        keyStruct(
+                                keyStructSchemaWithExtraField(DocumentState.POSTGRESQL_PROVIDER),
+                                DOCUMENT_UUID),
                         DocumentState.FailureReason.UNSUPPORTED_DOCUMENT_KEY_SHAPE),
                 invalidKey(
                         DocumentState.SQLSERVER_PROVIDER,
