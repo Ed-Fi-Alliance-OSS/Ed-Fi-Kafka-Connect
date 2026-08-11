@@ -307,27 +307,6 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
         return new TransformationFailureException(reason, metadata);
     }
 
-    private static TransformationFailureException transformationFailure(
-            final FailureReason reason,
-            final Provider provider,
-            final ConnectRecord<?> record,
-            final ClassifiedRecord classifiedRecord) {
-        final Map<String, String> metadata = failureMetadata(provider, record);
-        if (classifiedRecord != null) {
-            appendMetadata(metadata, "sourceCategory", classifiedRecord.sourceCategory());
-            if (classifiedRecord.sourceMetadata() != null) {
-                appendMetadata(metadata, "sourceSchema", classifiedRecord.sourceMetadata().sourceSchema());
-            }
-            if (classifiedRecord.sourceTable() != null) {
-                appendMetadata(metadata, "sourceTable", classifiedRecord.sourceTable().tableName());
-            }
-            if (classifiedRecord.sourceOperation() != null) {
-                appendMetadata(metadata, "operation", classifiedRecord.sourceOperation().code());
-            }
-        }
-        return new TransformationFailureException(reason, metadata);
-    }
-
     static TransformationFailureException classifiedFailure(
             final FailureReason reason,
             final ConnectRecord<?> record,
