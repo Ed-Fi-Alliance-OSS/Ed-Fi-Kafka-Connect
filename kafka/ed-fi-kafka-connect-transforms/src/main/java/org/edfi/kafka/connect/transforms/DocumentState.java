@@ -55,7 +55,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
     private static final String POSTGRESQL_JSON_SCHEMA_NAME = "io.debezium.data.Json";
     private static final String POSTGRESQL_TIMESTAMP_SCHEMA_NAME = "io.debezium.time.ZonedTimestamp";
     private static final String SQLSERVER_TIMESTAMP_SCHEMA_NAME = "io.debezium.time.IsoTimestamp";
-    private static final String SQLSERVER_UNAVAILABLE_VALUE = "__debezium_unavailable_value";
+    private static final String DEBEZIUM_UNAVAILABLE_VALUE = "__debezium_unavailable_value";
     private static final int DEBEZIUM_LOGICAL_SCHEMA_VERSION = 1;
     private static final int MAX_METADATA_VALUE_LENGTH = 128;
 
@@ -853,7 +853,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
 
         private boolean isAbsentDeleteBeforeDocumentUuid(final Object value, final Schema schema) {
             return value == null
-                    || (SQLSERVER_UNAVAILABLE_VALUE.equals(value)
+                    || (DEBEZIUM_UNAVAILABLE_VALUE.equals(value)
                             && isPinnedSqlServerUnavailableBeforeDocumentUuid(schema));
         }
 
@@ -923,8 +923,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
                 throw classifiedFailure(FailureReason.MISSING_REQUIRED_FIELD, record, classifiedRecord);
             }
             if (fieldKind == FieldKind.DOCUMENT_JSON
-                    && provider == Provider.SQLSERVER
-                    && SQLSERVER_UNAVAILABLE_VALUE.equals(stringValue)) {
+                    && DEBEZIUM_UNAVAILABLE_VALUE.equals(stringValue)) {
                 throw classifiedFailure(FailureReason.UNAVAILABLE_DOCUMENT_JSON, record, classifiedRecord);
             }
             return stringValue;

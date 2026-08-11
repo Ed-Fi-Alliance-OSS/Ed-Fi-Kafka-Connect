@@ -27,6 +27,7 @@ import static org.assertj.core.api.Assertions.catchThrowable;
 class DocumentStateUpsertTest {
 
     private static final String FIXTURE_CASE = "ordinary-link-bearing-student-school-association";
+    private static final String DEBEZIUM_UNAVAILABLE_VALUE = "__debezium_unavailable_value";
     private static final BigDecimal HIGH_PRECISION_DECIMAL =
             new BigDecimal("3.141592653589793238462643383279");
     private static final BigDecimal OUT_OF_RANGE_INTEGER = new BigDecimal("9223372036854775808");
@@ -257,6 +258,29 @@ class DocumentStateUpsertTest {
     }
 
     @Test
+    void Given_DocumentJson_Content_Equals_Unavailable_Marker_Should_Preserve_As_Ordinary_String()
+            throws IOException {
+        final Struct after = DocumentStateTestRecords
+                .cacheRowBuilder(DocumentState.POSTGRESQL_PROVIDER)
+                .field(
+                        DocumentStateTestRecords.DOCUMENT_JSON_FIELD,
+                        DocumentStateTestRecords.documentJsonSchema(DocumentState.POSTGRESQL_PROVIDER),
+                        "{\"id\":\"" + DocumentStateTestRecords.DOCUMENT_UUID
+                                + "\",\"_lastModifiedDate\":\"2026-07-30T14:15:16Z\","
+                                + "\"status\":\"" + DEBEZIUM_UNAVAILABLE_VALUE + "\","
+                                + "\"items\":[\"" + DEBEZIUM_UNAVAILABLE_VALUE + "\"]}")
+                .build();
+
+        final SourceRecord result = DocumentStateTestRecords
+                .configuredTransform(DocumentState.POSTGRESQL_PROVIDER)
+                .apply(DocumentStateTestRecords.documentCacheRecord(DocumentState.POSTGRESQL_PROVIDER, after));
+
+        final JsonNode document = outputValue(result).get("document");
+        assertThat(document.get("status").asText()).isEqualTo(DEBEZIUM_UNAVAILABLE_VALUE);
+        assertThat(document.get("items").get(0).asText()).isEqualTo(DEBEZIUM_UNAVAILABLE_VALUE);
+    }
+
+    @Test
     void Given_Advertised_ValueSchema_Differs_From_Value_Struct_Schema_Should_Fail_Before_Public_Output() {
         final Struct after = DocumentStateTestRecords
                 .cacheRowBuilder(DocumentState.POSTGRESQL_PROVIDER)
@@ -340,7 +364,9 @@ class DocumentStateUpsertTest {
                         "{\"id\":\"" + DocumentStateTestRecords.DOCUMENT_UUID
                                 + "\",\"_lastModifiedDate\":\"2026-07-30T14:15:17Z\"}",
                         DocumentState.FailureReason.PUBLIC_DOCUMENT_INVARIANT_MISMATCH),
-                malformedDocumentJson(DocumentState.SQLSERVER_PROVIDER, "__debezium_unavailable_value",
+                malformedDocumentJson(DocumentState.POSTGRESQL_PROVIDER, DEBEZIUM_UNAVAILABLE_VALUE,
+                        DocumentState.FailureReason.UNAVAILABLE_DOCUMENT_JSON),
+                malformedDocumentJson(DocumentState.SQLSERVER_PROVIDER, DEBEZIUM_UNAVAILABLE_VALUE,
                         DocumentState.FailureReason.UNAVAILABLE_DOCUMENT_JSON));
     }
 
