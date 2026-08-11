@@ -159,10 +159,33 @@ class DocumentStateTombstoneTest {
         assertFailure(thrown, DocumentState.FailureReason.UNSUPPORTED_DOCUMENT_UUID_SHAPE, "Document");
     }
 
-    @Test
-    void Given_Automatic_Debezium_Delete_Tombstone_Should_Fail_As_Malformed_Retained_Input() {
+    @ParameterizedTest
+    @MethodSource("automaticDeleteTombstonesOnRecognizedSourceTopics")
+    void Given_Automatic_Debezium_Delete_Tombstone_On_Recognized_Source_Topic_Should_Drop(
+            final String provider,
+            final String sourceTable) {
         final SourceRecord record =
-                DocumentStateTestRecords.automaticDebeziumDeleteTombstone(DocumentState.POSTGRESQL_PROVIDER);
+                DocumentStateTestRecords.automaticDebeziumDeleteTombstone(provider, sourceTable);
+
+        final SourceRecord result = DocumentStateTestRecords.configuredTransform(provider).apply(record);
+
+        assertThat(result).isNull();
+    }
+
+    @Test
+    void Given_Null_Value_Retained_Record_On_Unrecognized_Source_Topic_Should_Fail_Closed() {
+        final SourceRecord automaticTombstone =
+                DocumentStateTestRecords.automaticDebeziumDeleteTombstone(
+                        DocumentState.POSTGRESQL_PROVIDER, "CdcHeartbeat");
+        final SourceRecord record = new SourceRecord(
+                automaticTombstone.sourcePartition(),
+                automaticTombstone.sourceOffset(),
+                automaticTombstone.topic(),
+                automaticTombstone.kafkaPartition(),
+                automaticTombstone.keySchema(),
+                automaticTombstone.key(),
+                null,
+                null);
 
         final Throwable thrown = catchThrowable(() -> DocumentStateTestRecords
                 .configuredTransform(DocumentState.POSTGRESQL_PROVIDER)
@@ -170,11 +193,32 @@ class DocumentStateTombstoneTest {
 
         assertThat(thrown)
                 .isInstanceOf(DataException.class)
-                .isInstanceOf(DocumentState.TransformationFailureException.class);
-        final DocumentState.TransformationFailureException exception =
-                (DocumentState.TransformationFailureException) thrown;
-        assertThat(exception.reason()).isEqualTo(DocumentState.FailureReason.MISSING_SOURCE_METADATA);
-        assertThat(exception.metadata()).containsOnlyKeys("provider", "sourceTopic");
+                .hasMessageContaining("missing source metadata")
+                .hasMessageContaining("sourceTopic=server.dms.CdcHeartbeat");
+    }
+
+    @Test
+    void Given_Null_Value_Retained_Record_On_Recognized_Source_Topic_Without_Key_Should_Fail_Closed() {
+        final SourceRecord automaticTombstone =
+                DocumentStateTestRecords.automaticDebeziumDeleteTombstone(DocumentState.POSTGRESQL_PROVIDER);
+        final SourceRecord record = new SourceRecord(
+                automaticTombstone.sourcePartition(),
+                automaticTombstone.sourceOffset(),
+                automaticTombstone.topic(),
+                automaticTombstone.kafkaPartition(),
+                null,
+                null,
+                null,
+                null);
+
+        final Throwable thrown = catchThrowable(() -> DocumentStateTestRecords
+                .configuredTransform(DocumentState.POSTGRESQL_PROVIDER)
+                .apply(record));
+
+        assertThat(thrown)
+                .isInstanceOf(DataException.class)
+                .hasMessageContaining("missing source metadata")
+                .hasMessageContaining("sourceTopic=server.dms.Document");
     }
 
     @ParameterizedTest
@@ -233,6 +277,18 @@ class DocumentStateTombstoneTest {
                     DocumentState.SQLSERVER_PROVIDER,
                     SchemaBuilder.string().name(DocumentStateTestRecords.POSTGRESQL_UUID_SCHEMA).build()
                 });
+    }
+
+    private static Stream<Object[]> automaticDeleteTombstonesOnRecognizedSourceTopics() {
+        return Stream.of(
+                automaticDeleteTombstone(DocumentState.POSTGRESQL_PROVIDER, "Document"),
+                automaticDeleteTombstone(DocumentState.POSTGRESQL_PROVIDER, "DocumentCache"),
+                automaticDeleteTombstone(DocumentState.SQLSERVER_PROVIDER, "Document"),
+                automaticDeleteTombstone(DocumentState.SQLSERVER_PROVIDER, "DocumentCache"));
+    }
+
+    private static Object[] automaticDeleteTombstone(final String provider, final String sourceTable) {
+        return new Object[] {provider, sourceTable};
     }
 
     private static Stream<String> cacheDropOperations() {

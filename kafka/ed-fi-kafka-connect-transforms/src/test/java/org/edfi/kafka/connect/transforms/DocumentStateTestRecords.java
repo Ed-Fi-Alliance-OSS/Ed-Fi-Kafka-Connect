@@ -110,10 +110,14 @@ final class DocumentStateTestRecords {
     }
 
     static SourceRecord automaticDebeziumDeleteTombstone(final String provider) {
+        return automaticDebeziumDeleteTombstone(provider, "Document");
+    }
+
+    static SourceRecord automaticDebeziumDeleteTombstone(final String provider, final String sourceTable) {
         final Schema keySchema = keyStructSchema(provider);
         final Struct key = new Struct(keySchema).put(DOCUMENT_UUID_FIELD, DOCUMENT_UUID);
         return new SourceRecord(
-                sourcePartition(), sourceOffset(), "server.dms.Document", null,
+                sourcePartition(), sourceOffset(), "server.dms." + sourceTable, null,
                 keySchema, key, null, null);
     }
 

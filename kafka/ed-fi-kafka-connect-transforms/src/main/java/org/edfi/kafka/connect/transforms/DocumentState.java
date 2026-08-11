@@ -90,6 +90,10 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
 
     @Override
     public R apply(final R record) {
+        if (isAutomaticDebeziumDeleteTombstoneOnRecognizedSourceTopic(record)) {
+            return null;
+        }
+
         final ClassifiedRecord classifiedRecord = classify(record);
         switch (classifiedRecord.outputKind()) {
             case DROP:
@@ -166,6 +170,23 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
             throw transformationFailure(FailureReason.MALFORMED_NATIVE_HEARTBEAT, null, record, null, null);
         }
         return topic.equals(NATIVE_HEARTBEAT_TOPIC_PREFIX + sourceServer);
+    }
+
+    private static boolean isAutomaticDebeziumDeleteTombstoneOnRecognizedSourceTopic(
+            final ConnectRecord<?> record) {
+        if (record.valueSchema() != null || record.value() != null
+                || record.keySchema() == null || record.key() == null) {
+            return false;
+        }
+
+        final String topic = record.topic();
+        return topic != null
+                && (isRelationalTopic(topic, DOCUMENT_TABLE) || isRelationalTopic(topic, DOCUMENT_CACHE_TABLE));
+    }
+
+    private static boolean isRelationalTopic(final String topic, final String sourceTable) {
+        final String suffix = "." + RELATIONAL_SCHEMA + "." + sourceTable;
+        return topic.endsWith(suffix) && topic.length() > suffix.length();
     }
 
     private static SourceOperation sourceOperation(
