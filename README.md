@@ -73,6 +73,78 @@ transforms.ExpandJson.sourceFields=DocumentJson
 > passing the record through, and dot-delimited nested paths in `sourceFields` are not
 > supported.
 
+### `DocumentState`
+
+This DMS-specific transformation converts raw schema-backed Debezium records for the
+relational `dms.DocumentCache`, `dms.Document`, and `dms.CdcHeartbeat` sources into the Ed-Fi
+document-state topic contract and its internal CDC progress topic. It is configured with only
+the provider and the two binding-scoped target topics:
+
+```properties
+transforms=documentState
+transforms.documentState.type=org.edfi.kafka.connect.transforms.DocumentState
+transforms.documentState.provider=<postgresql|sqlserver>
+transforms.documentState.target.topic=<instance document topic>
+transforms.documentState.progress.topic=<instance document topic>.cdc-progress
+```
+
+Public upserts emitted by `DocumentState` are named logical-byte values: the record has a
+required `BYTES` value schema named `org.edfi.kafka.connect.data.DocumentStateJson` at
+version `1` and a matching `byte[]` containing the complete final public JSON object. Use
+these top-level connector settings for the relational document-state connector:
+
+```properties
+message.key.columns=dms.Document:DocumentUuid;dms.DocumentCache:DocumentUuid
+key.converter=org.apache.kafka.connect.storage.StringConverter
+value.converter=org.edfi.kafka.connect.converters.DocumentStateJsonConverter
+value.converter.schemas.enable=false
+value.converter.decimal.format=NUMERIC
+tombstones.on.delete=false
+```
+
+`message.key.columns` is required for both providers so Debezium keys `dms.Document`
+and `dms.DocumentCache` records by `DocumentUuid` instead of their relational primary
+keys. Use the exact fully qualified table identifiers emitted by DMS provider setup if
+they differ from the example above. This does not change table primary keys, and it does
+not require a `DocumentCache.DocumentUuid` index.
+
+`StringConverter` is required for both public document keys and internal progress keys, so
+Kafka key bytes are plain UTF-8 strings with no JSON quoting and no Kafka Connect
+`schema` or `payload` wrapper. `tombstones.on.delete=false` is required for both
+PostgreSQL and SQL Server source connectors: `DocumentState` turns the authoritative
+`dms.Document` delete envelope into exactly one public tombstone, while Debezium's
+additional automatic tombstone is suppressed and cache deletes publish no public record.
+
+`DocumentStateJsonConverter` passes only that exact public upsert schema/value handshake
+through as a defensive byte copy, so the Kafka bytes are a plain JSON object with no
+Kafka Connect `schema` or `payload` wrapper, no Base64 encoding, and no second JSON
+serialization pass. Public tombstones remain record-level null values. Every other non-null
+record, including internal progress records, is delegated to Kafka Connect 4.3
+`JsonConverter` with `schemas.enable=false` and `decimal.format=NUMERIC`. Keep
+`decimal.format=NUMERIC` as the required defensive delegate setting; public document
+upserts bypass the delegate, so public decimal fidelity does not depend on that setting.
+
+The transform builds the final JSON tree itself so collection objects preserve absent
+properties instead of gaining synthetic nulls, and valid `DocumentJson` integer and decimal
+values publish as exact JSON numbers. Do not replace this with `Double`/`Float`, string
+conversion, generic `JsonConverter` public upserts, Avro, Protobuf, or Schema Registry for
+the v1 document-state contract.
+
+For SQL Server source connectors, also suppress consumer-facing schema-change records and
+set the Debezium source temporal mode explicitly:
+
+```properties
+include.schema.changes=false
+time.precision.mode=isostring
+```
+
+`include.schema.changes=false` keeps SQL Server schema-change records out of the same
+connector task that runs `DocumentState`; the required internal schema history settings are
+separate and remain enabled. `DocumentState` requires `dms.DocumentCache.LastModifiedAt` to
+arrive as a `STRING` with the `io.debezium.time.IsoTimestamp` logical type. Debezium's
+default `adaptive` mode emits SQL Server `datetime2(7)` as an `INT64`
+`io.debezium.time.NanoTimestamp`, which is rejected as an unsupported retained-row field
+shape.
 
 ## Running transformations
 
@@ -105,9 +177,9 @@ gradle-wrapper.jar in the gradle\wrapper folder `> gradle wrapper`
 
 This project includes a series of *gradle* tasks:
 
-- `./gradlew build`: Compile code
+- `./gradlew build -PedfiDmsMaterializedDocumentFixtureRoot=<DMS checkout>/src/dms/backend/Fixtures/document-cache/materialized-documents`: Compile code
 
-- `./gradlew test`: Run unit tests
+- `./gradlew test -PedfiDmsMaterializedDocumentFixtureRoot=<DMS checkout>/src/dms/backend/Fixtures/document-cache/materialized-documents`: Run unit tests
 
 - `./gradlew installDist`: Creates a jar distributable file, located under
   `/build/install/ed-fi-kafka-connect-transforms/ed-fi-kafka-connect-transforms-{version}.jar`

@@ -11,6 +11,8 @@ on:
   workflow_dispatch:
 
 env:
+  # Shared DMS fixture pin; validate-dms-fixture-ref.sh enforces pin correctness and reports fixture drift as warning-only.
+  DMS_FIXTURE_REF: adc562b669d7b34c1a1ef9b84b53f0f93082e5f0
   MANIFEST_FILE: "Ed-Fi-Kafka-Connect-sbom-create.spdx.json"  
   PACKAGE_NAME: "ed-fi-kafka-connect-transforms"
   REF: ${{ github.ref_name }}
@@ -33,6 +35,18 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
+
+      - name: Checkout DMS fixtures
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: Ed-Fi-Alliance-OSS/Data-Management-Service
+          ref: ${{ env.DMS_FIXTURE_REF }}
+          fetch-depth: 0
+          path: dms
+
+      - name: Validate DMS fixture pin
+        shell: bash
+        run: bash ${{ github.workspace }}/.github/scripts/validate-dms-fixture-ref.sh ${{ github.workspace }}/dms
 
       - name: Set Version Numbers      
         id: versions
@@ -63,7 +77,7 @@ jobs:
       - name: Build with Gradle
         run: |
           $packageVersion = "${{ steps.versions.outputs.connector-semver }}"
-          ./gradlew clean build -Pversion="${{ steps.versions.outputs.connector-semver }}"  
+          ./gradlew clean build -Pversion="${{ steps.versions.outputs.connector-semver }}" "-PedfiDmsMaterializedDocumentFixtureRoot=${{ github.workspace }}/dms/src/dms/backend/Fixtures/document-cache/materialized-documents"
         
       - name: Generate hash for the jar file
         id: hash-code

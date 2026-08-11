@@ -15,19 +15,34 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class ServiceLoaderManifestTest {
 
-    private static final String SERVICE_LOADER_RESOURCE = "/META-INF/services/"
+    private static final String TRANSFORMATION_SERVICE_LOADER_RESOURCE = "/META-INF/services/"
             + "org.apache.kafka.connect.transforms.Transformation";
+    private static final String CONVERTER_SERVICE_LOADER_RESOURCE = "/META-INF/services/"
+            + "org.apache.kafka.connect.storage.Converter";
 
     @Test
     void Should_Advertise_Current_Transformations() throws IOException {
-        final byte[] resource = getClass().getResourceAsStream(SERVICE_LOADER_RESOURCE).readAllBytes();
-        final List<String> providers = new String(resource, StandardCharsets.UTF_8)
-                .lines()
-                .filter(line -> !line.isBlank())
-                .toList();
+        final List<String> providers = providersFrom(TRANSFORMATION_SERVICE_LOADER_RESOURCE);
 
         assertThat(providers).containsExactly(
                 "org.edfi.kafka.connect.transforms.DebeziumDeletedToTombstone",
+                "org.edfi.kafka.connect.transforms.DocumentState",
                 "org.edfi.kafka.connect.transforms.ExpandJson$Value");
+    }
+
+    @Test
+    void Should_Advertise_Current_Converters() throws IOException {
+        final List<String> providers = providersFrom(CONVERTER_SERVICE_LOADER_RESOURCE);
+
+        assertThat(providers).containsExactly(
+                "org.edfi.kafka.connect.converters.DocumentStateJsonConverter");
+    }
+
+    private List<String> providersFrom(final String serviceLoaderResource) throws IOException {
+        final byte[] resource = getClass().getResourceAsStream(serviceLoaderResource).readAllBytes();
+        return new String(resource, StandardCharsets.UTF_8)
+                .lines()
+                .filter(line -> !line.isBlank())
+                .toList();
     }
 }

@@ -12,12 +12,14 @@ on:
     paths:
       - "kafka/**"
       - ".github/**/*.yml"
+      - ".github/scripts/validate-dms-fixture-ref.sh"
   pull_request:
     branches:
       - main
     paths:
       - "kafka/**"
       - ".github/**/*.yml"
+      - ".github/scripts/validate-dms-fixture-ref.sh"
   workflow_dispatch:
 
 concurrency:
@@ -25,6 +27,10 @@ concurrency:
   cancel-in-progress: true
 
 permissions: read-all
+
+env:
+  # Shared DMS fixture pin; validate-dms-fixture-ref.sh enforces pin correctness and reports fixture drift as warning-only.
+  DMS_FIXTURE_REF: adc562b669d7b34c1a1ef9b84b53f0f93082e5f0
 
 jobs:
   scan-actions-bidi:
@@ -49,7 +55,7 @@ jobs:
           set -euo pipefail
           target=$(grep -oP 'targetCompatibility\s*=\s*JavaVersion\.VERSION_\K[0-9]+' \
             kafka/ed-fi-kafka-connect-transforms/build.gradle)
-          image=$(grep -oP '^FROM \Kdebezium/connect:\S+' kafka/Dockerfile | head -n1)
+          image=$(grep -oP '^FROM \K(?:quay\.io/)?debezium/connect:\S+' kafka/Dockerfile | head -n1)
           echo "SMT bytecode target: Java $target"
           echo "Runtime image:       $image"
           # "|| true" so an unrecognized version banner reaches the -z diagnostic below instead
@@ -68,7 +74,7 @@ jobs:
           echo "OK: runtime JDK $runtime can load Java $target bytecode."
 
   verify-image-plugins:
-    name: Verify the SMT plugins load (Connect 3.x and 4.x) and execute
+    name: Verify the SMT plugins load and execute on Kafka Connect 4.3
     runs-on: ubuntu-latest
     steps:
       - name: Checkout the Repo
@@ -86,19 +92,34 @@ jobs:
       - name: Build the Kafka Connect image
         run: docker build -t ed-fi-kafka-connect:smoke --build-context parentdir=. -f kafka/Dockerfile kafka
 
-      # The class list under test is read from the ServiceLoader manifest — the single source
-      # of truth for what the plugin ships — so a transform added to the manifest is verified
-      # here (and in the Connect 4.x step below) without touching this workflow.
-      - name: Read the transform class list from the ServiceLoader manifest
+      - name: Verify the built image runtime pin
         run: |
           set -euo pipefail
-          manifest="kafka/ed-fi-kafka-connect-transforms/src/main/resources/META-INF/services/org.apache.kafka.connect.transforms.Transformation"
-          sed -e 's/#.*//' -e 's/[[:space:]]//g' "$manifest" | grep -v '^$' > transform-classes.txt
-          if [ ! -s transform-classes.txt ]; then
-            echo "::error::No transform classes listed in $manifest"
-            exit 1
-          fi
-          cat transform-classes.txt
+          docker run --rm --entrypoint bash ed-fi-kafka-connect:smoke -lc '
+            test -f /kafka/libs/connect-api-4.3.0.jar
+            test -f /kafka/libs/kafka_2.13-4.3.0.jar
+            test -f /kafka/libs/jackson-databind-2.21.2.jar
+          '
+          echo "OK: built image contains Kafka Connect 4.3.0 and Jackson 2.21.2 runtime jars."
+
+      # The class list under test is read from the ServiceLoader manifests — the single source
+      # of truth for what the plugin ships — so a provider added to a manifest is verified
+      # here without touching this workflow.
+      - name: Read the plugin class lists from the ServiceLoader manifests
+        run: |
+          set -euo pipefail
+          : > plugin-classes.txt
+          for manifest in \
+            "kafka/ed-fi-kafka-connect-transforms/src/main/resources/META-INF/services/org.apache.kafka.connect.transforms.Transformation" \
+            "kafka/ed-fi-kafka-connect-transforms/src/main/resources/META-INF/services/org.apache.kafka.connect.storage.Converter"; do
+            classes=$(sed -e 's/#.*//' -e 's/[[:space:]]//g' "$manifest" | grep -v '^$' || true)
+            if [ -z "$classes" ]; then
+              echo "::error::No plugin classes listed in $manifest"
+              exit 1
+            fi
+            printf '%s\n' "$classes" >> plugin-classes.txt
+          done
+          cat plugin-classes.txt
 
       # connect-plugin-path.sh scans the plugin path with the image's own JDK and reports
       # per-plugin isLoadable and hasManifest columns, catching a jar that is missing from the
@@ -106,7 +127,7 @@ jobs:
       # ServiceLoader manifest. It stops at class linking: dependencies referenced only from
       # method bodies (e.g. Jackson) are not resolved until the transform executes, which the
       # execution smoke below covers.
-      - name: Verify the SMT classes load in the image (Connect 3.x runtime)
+      - name: Verify the plugin classes load in the image (Kafka Connect 4.3 runtime)
         run: |
           set -euo pipefail
           plugins=$(docker run --rm --entrypoint /kafka/bin/connect-plugin-path.sh \
@@ -124,8 +145,8 @@ jobs:
               echo "::error::$class: isLoadable=$loadable hasManifest=$manifest (both must be true): $row"
               exit 1
             fi
-          done < transform-classes.txt
-          echo "OK: all Ed-Fi SMT classes load in the image and carry ServiceLoader manifests."
+          done < plugin-classes.txt
+          echo "OK: all Ed-Fi plugin classes load in the image and carry ServiceLoader manifests."
 
       - name: Extract the plugin directory and runtime classpath from the image
         run: |
@@ -135,66 +156,61 @@ jobs:
           docker cp smt-extract:/kafka/libs ./image-libs
           docker rm smt-extract
 
-      # DMS-1240 acceptance: the transform must load under Kafka Connect 4.x, not only the
-      # shipped Connect 3.x runtime (the whole reason the RedHat expandjsonsmt is being
-      # replaced). Connect 4.x discovers plugins through KIP-898 ServiceLoader manifests by
-      # default (plugin.discovery=service_load), so hasManifest=true is load-bearing here. The
-      # plugin directory lifted from the built image is scanned by a stock Apache Kafka 4.x
-      # image with its own JDK.
-      - name: Verify the SMT classes load under Kafka Connect 4.x
+      - name: Verify DocumentState transform and converter ship in the same image artifact
         run: |
           set -euo pipefail
-          plugins=$(docker run --rm \
-            -v "$PWD/smt-plugin:/smt-plugins/ed-fi-kafka-connect-transforms:ro" \
-            --entrypoint /opt/kafka/bin/connect-plugin-path.sh \
-            apache/kafka:4.3.1@sha256:77e3df9054047a88b520d0cc46e16696d3b22022e1d580aeccd2632df6532837 \
-            list --plugin-path /smt-plugins)
-          echo "$plugins"
-          while IFS= read -r class; do
-            row=$(grep -F "$class" <<<"$plugins" || true)
-            if [ -z "$row" ]; then
-              echo "::error::$class was not discovered under Kafka Connect 4.x"
-              exit 1
-            fi
-            loadable=$(cut -f6 <<<"$row")
-            manifest=$(cut -f7 <<<"$row")
-            if [ "$loadable" != "true" ] || [ "$manifest" != "true" ]; then
-              echo "::error::$class under Connect 4.x: isLoadable=$loadable hasManifest=$manifest (both must be true): $row"
-              exit 1
-            fi
-          done < transform-classes.txt
-          echo "OK: all Ed-Fi SMT classes load under Kafka Connect 4.x."
+          jar_path=$(find smt-plugin -maxdepth 1 -name '*.jar' | head -n1)
+          if [ -z "$jar_path" ]; then
+            echo "::error::No Ed-Fi Kafka Connect transform jar found in the image plugin directory"
+            exit 1
+          fi
+          jar tf "$jar_path" | grep -Fx org/edfi/kafka/connect/transforms/DocumentState.class
+          jar tf "$jar_path" | grep -Fx org/edfi/kafka/connect/converters/DocumentStateJsonConverter.class
+          echo "OK: DocumentState and DocumentStateJsonConverter are packaged together in $jar_path."
 
       # The load checks above stop at linking. Jackson is provided by the Connect runtime
       # (compileOnly in build.gradle, not bundled in the plugin jar) and is first resolved when
-      # ExpandJson processes a record, so a missing or incompatible runtime Jackson passes every
-      # load check and fails on the first record. This compiles the smoke against the image's
-      # own jars and runs it inside the Connect 3.x image, applying ExpandJson$Value to one
-      # schema-backed record on the image's runtime classpath.
-      - name: Run the ExpandJson execution smoke inside the Connect 3.x image
+      # the transforms process a record, so a missing or incompatible runtime Jackson passes
+      # every load check and fails on the first record. This compiles the smoke classes against
+      # the image's own jars and runs them inside the pinned Debezium 3.6 / Kafka Connect 4.3
+      # image runtime classpath.
+      - name: Compile the image execution smokes
         run: |
           set -euo pipefail
           mkdir -p smoke-classes
-          javac --release 17 -cp "image-libs/*:smt-plugin/*" -d smoke-classes \
-            kafka/ci-smoke/ExpandJsonExecutionSmoke.java
+          javac --release 17 -proc:none -cp "image-libs/*:smt-plugin/*" -d smoke-classes \
+            kafka/ci-smoke/ExpandJsonExecutionSmoke.java \
+            kafka/ci-smoke/DocumentStateExecutionSmoke.java
+
+      - name: Checkout DMS shared document fixtures
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: Ed-Fi-Alliance-OSS/Data-Management-Service
+          ref: ${{ env.DMS_FIXTURE_REF }}
+          fetch-depth: 0
+          path: dms
+
+      - name: Validate DMS fixture pin
+        run: bash ${{ github.workspace }}/.github/scripts/validate-dms-fixture-ref.sh ${{ github.workspace }}/dms
+
+      - name: Run the ExpandJson execution smoke inside the Kafka Connect 4.3 image
+        run: |
+          set -euo pipefail
           docker run --rm -v "$PWD/smoke-classes:/smoke:ro" --entrypoint java \
             ed-fi-kafka-connect:smoke \
             -cp '/smoke:/kafka/libs/*:/kafka/connect/ed-fi-kafka-connect-transforms/*' \
             ExpandJsonExecutionSmoke
 
-      # Re-run the same executable smoke inside the stock Kafka 4.x image. The plugin scan above
-      # proves ServiceLoader discovery under Connect 4.x; this proves ExpandJson can execute there
-      # with the Kafka 4.x runtime-provided dependencies instead of only linking.
-      - name: Run the ExpandJson execution smoke inside the Connect 4.x image
+      - name: Run the DocumentState execution smoke inside the Kafka Connect 4.3 image
         run: |
           set -euo pipefail
           docker run --rm \
             -v "$PWD/smoke-classes:/smoke:ro" \
-            -v "$PWD/smt-plugin:/smt-plugins/ed-fi-kafka-connect-transforms:ro" \
+            -v "$PWD/dms/src/dms/backend/Fixtures/document-cache/materialized-documents/school-address-property-absence:/fixtures/school-address-property-absence:ro" \
             --entrypoint java \
-            apache/kafka:4.3.1@sha256:77e3df9054047a88b520d0cc46e16696d3b22022e1d580aeccd2632df6532837 \
-            -cp '/smoke:/opt/kafka/libs/*:/smt-plugins/ed-fi-kafka-connect-transforms/*' \
-            ExpandJsonExecutionSmoke
+            ed-fi-kafka-connect:smoke \
+            -cp '/smoke:/kafka/libs/*:/kafka/connect/ed-fi-kafka-connect-transforms/*' \
+            DocumentStateExecutionSmoke /fixtures/school-address-property-absence
 
   build:
     name: Build
@@ -205,6 +221,17 @@ jobs:
     steps:
       - name: Checkout the Repo
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Checkout DMS fixtures
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: Ed-Fi-Alliance-OSS/Data-Management-Service
+          ref: ${{ env.DMS_FIXTURE_REF }}
+          fetch-depth: 0
+          path: dms
+
+      - name: Validate DMS fixture pin
+        run: bash ${{ github.workspace }}/.github/scripts/validate-dms-fixture-ref.sh ${{ github.workspace }}/dms
 
       - name: Dependency Review ("Dependabot on PR")
         if: ${{ github.event_name == 'pull_request' && !github.event.repository.fork }}
@@ -230,10 +257,7 @@ jobs:
         run: chmod +x ./gradlew        
 
       - name: Build with Gradle
-        run: ./gradlew clean build        
-
-      - name: Run tests with Gradle
-        run: ./gradlew test        
+        run: ./gradlew clean build -PedfiDmsMaterializedDocumentFixtureRoot=${{ github.workspace }}/dms/src/dms/backend/Fixtures/document-cache/materialized-documents
       
       - name: Upload Test Results
         if: always()

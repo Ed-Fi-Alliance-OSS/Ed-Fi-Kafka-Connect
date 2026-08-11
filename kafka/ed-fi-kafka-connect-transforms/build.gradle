@@ -22,12 +22,12 @@ repositories {
 }
 
 // The SMT jar is compiled to Java 17 bytecode. The deployment runtime
-// (debezium/connect:2.7.0.Final, see ../Dockerfile) ships OpenJDK 21, which loads Java 17 classes
+// (quay.io/debezium/connect:3.6.0.Final, see ../Dockerfile) ships OpenJDK 21, which loads Java 17 classes
 // without UnsupportedClassVersionError. Two CI jobs in .github/workflows/on-pullrequest.yml guard
 // this on every change: "Verify runtime Java compatibility" enforces runtime JDK >= this target,
-// and "Verify the SMT plugins load (Connect 3.x and 4.x) and execute" builds the image, proves
-// the transform classes load inside it and under Kafka Connect 4.x, and executes ExpandJson on
-// one record against both runtime classpaths.
+// and "Verify the SMT plugins load and execute on Kafka Connect 4.3" builds the image, proves
+// the transform classes load inside it, and executes representative smoke records against the
+// pinned runtime classpath.
 java {
     sourceCompatibility = JavaVersion.VERSION_17
     targetCompatibility = JavaVersion.VERSION_17
@@ -35,13 +35,13 @@ java {
 
 ext {
     // Match the Kafka version shipped in the Debezium/Connect runtime image
-    // (debezium/connect:2.7.0.Final runs Kafka 3.7.0, see ../Dockerfile) so the SMT cannot
+    // (quay.io/debezium/connect:3.6.0.Final runs Kafka Connect 4.3.0, see ../Dockerfile) so the SMT cannot
     // compile against connect-api members newer than the runtime classpath it loads on.
-    kafkaVersion = "3.7.0"
-    debeziumVersion = "2.7.0.Final"
+    kafkaVersion = "4.3.0"
+    debeziumVersion = "3.6.0.Final"
     // Match the Jackson version already shipped in the Debezium/Connect runtime image
     // so the transform relies on the runtime's Jackson (compileOnly) and bundles nothing.
-    jacksonVersion = "2.16.0"
+    jacksonVersion = "2.21.2"
 }
 
 distributions {
@@ -81,6 +81,7 @@ sourceSets {
 
 dependencies {
     compileOnly "org.apache.kafka:connect-api:$kafkaVersion"
+    compileOnly "org.apache.kafka:connect-json:$kafkaVersion"
     compileOnly "io.debezium:debezium-api:$debeziumVersion"
     // Jackson is provided by the Connect runtime; compile against it but do not bundle it.
     compileOnly "com.fasterxml.jackson.core:jackson-databind:$jacksonVersion"
@@ -102,12 +103,16 @@ dependencies {
 }
 
 checkstyle {
-    toolVersion "8.21"
+    toolVersion "8.36"
 }
 
 test {
     useJUnitPlatform {
         includeEngines 'junit-jupiter'
+    }
+    if (project.hasProperty('edfiDmsMaterializedDocumentFixtureRoot')) {
+        systemProperty 'edfiDmsMaterializedDocumentFixtureRoot',
+                project.property('edfiDmsMaterializedDocumentFixtureRoot')
     }
 }
 
