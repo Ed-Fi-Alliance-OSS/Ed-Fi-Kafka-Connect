@@ -208,6 +208,26 @@ public final class DocumentStateExecutionSmoke {
             expect("kept".equals(sourceHeader.value()), "progress header value");
             expect(record.sourcePartition().equals(out.sourcePartition()), "progress source partition");
             expect(record.sourceOffset().equals(out.sourceOffset()), "progress source offset");
+
+            final SourceRecord nullValueRecord = new SourceRecord(
+                    sourcePartition, sourceOffset(), heartbeatTopic, null,
+                    null, null, null, null, 322L, headers);
+
+            final SourceRecord nullValueOut = transform.apply(nullValueRecord);
+
+            expect(PROGRESS_TOPIC.equals(nullValueOut.topic()), "null progress topic = " + nullValueOut.topic());
+            expect(nullValueOut.keySchema() == Schema.STRING_SCHEMA, "null progress key schema");
+            expect("cdc-progress".equals(nullValueOut.key()), "null progress key = " + nullValueOut.key());
+            expect(nullValueOut.valueSchema() == Schema.STRING_SCHEMA, "null progress value schema");
+            expect("native-heartbeat".equals(nullValueOut.value()), "null progress value");
+            expect("\"native-heartbeat\"".equals(
+                            new String(serializedPublicValue(nullValueOut), StandardCharsets.UTF_8)),
+                    "null progress serialized through JsonConverter delegate");
+            expect(Long.valueOf(322L).equals(nullValueOut.timestamp()), "null progress timestamp");
+            expect(nullValueRecord.sourcePartition().equals(nullValueOut.sourcePartition()),
+                    "null progress source partition");
+            expect(nullValueRecord.sourceOffset().equals(nullValueOut.sourceOffset()),
+                    "null progress source offset");
         } finally {
             transform.close();
         }

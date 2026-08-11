@@ -28,6 +28,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
     static final String PROGRESS_TOPIC_SUFFIX = ".cdc-progress";
     private static final String NATIVE_HEARTBEAT_TOPIC_PREFIX = "__debezium-heartbeat.";
     private static final String PROGRESS_KEY = "cdc-progress";
+    private static final String NATIVE_HEARTBEAT_PROGRESS_VALUE = "native-heartbeat";
 
     private static final String SOURCE_FIELD = "source";
     private static final String SOURCE_SCHEMA_FIELD = "schema";
@@ -105,7 +106,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
                 final ValidatedDocumentKey tombstoneKey = validatePublicDocumentKey(record, classifiedRecord);
                 return publicTombstone(record, classifiedRecord, tombstoneKey);
             case PROGRESS:
-                return progress(record);
+                return progress(record, classifiedRecord);
             default:
                 throw new IllegalStateException("Unhandled output kind: " + classifiedRecord.outputKind());
         }
@@ -155,8 +156,13 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
         return DocumentStateJson.publicTombstoneRecord(record, settings.targetTopic(), documentKey);
     }
 
-    private R progress(final R record) {
-        return DocumentStateJson.progressRecord(record, settings.progressTopic(), PROGRESS_KEY);
+    private R progress(final R record, final ClassifiedRecord classifiedRecord) {
+        return DocumentStateJson.progressRecord(
+                record,
+                settings.progressTopic(),
+                PROGRESS_KEY,
+                classifiedRecord.sourceCategory() == SourceCategory.NATIVE_HEARTBEAT,
+                NATIVE_HEARTBEAT_PROGRESS_VALUE);
     }
 
     private static boolean isNativeHeartbeat(final ConnectRecord<?> record) {

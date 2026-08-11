@@ -76,10 +76,16 @@ final class DocumentStateJson {
     static <R extends ConnectRecord<R>> R progressRecord(
             final R record,
             final String progressTopic,
-            final String progressKey) {
+            final String progressKey,
+            final boolean nativeHeartbeat,
+            final String nativeHeartbeatProgressValue) {
+        final Schema valueSchema = nativeHeartbeat && record.valueSchema() == null && record.value() == null
+                ? Schema.STRING_SCHEMA : record.valueSchema();
+        final Object value = nativeHeartbeat && record.valueSchema() == null && record.value() == null
+                ? nativeHeartbeatProgressValue : record.value();
         return record.newRecord(
-                progressTopic, null, Schema.STRING_SCHEMA, progressKey, record.valueSchema(), record.value(),
-                record.timestamp(), record.headers());
+                progressTopic, null, Schema.STRING_SCHEMA, progressKey, valueSchema, value, record.timestamp(),
+                record.headers());
     }
 
     static ByteBackedValue publicUpsertValue(

@@ -24,6 +24,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class DocumentStateProgressTest {
 
     private static final String PROGRESS_KEY = "cdc-progress";
+    private static final String NATIVE_HEARTBEAT_PROGRESS_VALUE = "native-heartbeat";
     private static final long TIMESTAMP = 987L;
 
     @ParameterizedTest
@@ -82,6 +83,18 @@ class DocumentStateProgressTest {
         assertProgressRecord(result, record);
     }
 
+    @Test
+    void Given_Native_Debezium_Heartbeat_With_Null_Value_Should_Use_Non_Null_Progress_Marker() {
+        final SourceRecord record = DocumentStateTestRecords.nativeHeartbeatRecord(
+                "__debezium-heartbeat.dms", null, null, null, null, TIMESTAMP, headers());
+
+        final SourceRecord result = DocumentStateTestRecords
+                .configuredTransform(DocumentState.SQLSERVER_PROVIDER)
+                .apply(record);
+
+        assertProgressRecordWithValue(result, record, Schema.STRING_SCHEMA, NATIVE_HEARTBEAT_PROGRESS_VALUE);
+    }
+
     private static Stream<Object[]> retainedHeartbeatOperations() {
         return Stream.of(
                 new Object[] {DocumentState.POSTGRESQL_PROVIDER, "c"},
@@ -122,13 +135,11 @@ class DocumentStateProgressTest {
 
         return Stream.of(
                 DocumentStateTestRecords.nativeHeartbeatRecord(
-                        "__debezium-heartbeat.dms", null, null, null, null, TIMESTAMP, headers()),
-                DocumentStateTestRecords.nativeHeartbeatRecord(
                         "__debezium-heartbeat.dms", Schema.STRING_SCHEMA, "source-key",
                         heartbeatValueSchema, heartbeatValue, TIMESTAMP, headers()),
                 DocumentStateTestRecords.nativeHeartbeatRecord(
                         "__debezium-heartbeat.dms", (Schema) schemaBackedKey[0],
-                        schemaBackedKey[1], null, null, TIMESTAMP, headers()));
+                        schemaBackedKey[1], heartbeatValueSchema, heartbeatValue, TIMESTAMP, headers()));
     }
 
     private static Headers headers() {
@@ -136,13 +147,27 @@ class DocumentStateProgressTest {
     }
 
     private static void assertProgressRecord(final SourceRecord result, final SourceRecord record) {
+        assertProgressRecordMetadata(result, record);
+        assertThat(result.valueSchema()).isSameAs(record.valueSchema());
+        assertThat(result.value()).isSameAs(record.value());
+    }
+
+    private static void assertProgressRecordWithValue(
+            final SourceRecord result,
+            final SourceRecord record,
+            final Schema expectedValueSchema,
+            final Object expectedValue) {
+        assertProgressRecordMetadata(result, record);
+        assertThat(result.valueSchema()).isSameAs(expectedValueSchema);
+        assertThat(result.value()).isEqualTo(expectedValue);
+    }
+
+    private static void assertProgressRecordMetadata(final SourceRecord result, final SourceRecord record) {
         assertThat(result).isNotNull();
         assertThat(result.topic()).isEqualTo(DocumentStateTestRecords.PROGRESS_TOPIC);
         assertThat(result.kafkaPartition()).isNull();
         assertThat(result.keySchema()).isSameAs(Schema.STRING_SCHEMA);
         assertThat(result.key()).isEqualTo(PROGRESS_KEY);
-        assertThat(result.valueSchema()).isSameAs(record.valueSchema());
-        assertThat(result.value()).isSameAs(record.value());
         final Header sourceHeader = result.headers().lastWithName("source-header");
         assertThat(sourceHeader).isNotNull();
         assertThat(sourceHeader.key()).isEqualTo("source-header");
