@@ -37,6 +37,21 @@ class DocumentStateFailureTest {
     }
 
     @Test
+    void Given_Unconfigured_Transform_Should_Fail_Before_Automatic_Debezium_Tombstone_Drop() {
+        final SourceRecord record = DocumentStateTestRecords.automaticDebeziumDeleteTombstone(
+                DocumentState.POSTGRESQL_PROVIDER);
+
+        final Throwable thrown = catchThrowable(() -> new DocumentState<SourceRecord>().apply(record));
+
+        assertThat(thrown)
+                .isInstanceOf(DataException.class)
+                .isInstanceOf(DocumentState.TransformationFailureException.class);
+        final DocumentState.TransformationFailureException exception =
+                (DocumentState.TransformationFailureException) thrown;
+        assertThat(exception.reason()).isEqualTo(DocumentState.FailureReason.NOT_CONFIGURED);
+    }
+
+    @Test
     void Given_Malformed_Retained_Record_Should_Expose_Reason_And_Bounded_Metadata() {
         final Throwable thrown = catchThrowable(() -> configuredTransform()
                 .classify(record(POSTGRESQL_SOURCE_SCHEMA, "public", "DocumentCache", "c")));

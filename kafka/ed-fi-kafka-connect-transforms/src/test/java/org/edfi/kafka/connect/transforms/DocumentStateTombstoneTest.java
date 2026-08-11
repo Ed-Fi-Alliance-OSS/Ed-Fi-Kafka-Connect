@@ -173,6 +173,41 @@ class DocumentStateTombstoneTest {
     }
 
     @Test
+    void Given_Automatic_Debezium_Delete_Tombstone_With_Plain_String_Key_Should_Fail_Closed() {
+        final SourceRecord automaticTombstone =
+                DocumentStateTestRecords.automaticDebeziumDeleteTombstone(DocumentState.POSTGRESQL_PROVIDER);
+        final SourceRecord record = recordWithKey(
+                automaticTombstone, Schema.STRING_SCHEMA, DocumentStateTestRecords.DOCUMENT_UUID);
+
+        final Throwable thrown = catchThrowable(() -> DocumentStateTestRecords
+                .configuredTransform(DocumentState.POSTGRESQL_PROVIDER)
+                .apply(record));
+
+        assertFailure(thrown, DocumentState.FailureReason.UNSUPPORTED_DOCUMENT_KEY_SHAPE, "Document");
+    }
+
+    @Test
+    void Given_Null_Value_Record_On_Different_Source_Server_Topic_Should_Fail_Closed() {
+        final SourceRecord automaticTombstone =
+                DocumentStateTestRecords.automaticDebeziumDeleteTombstone(DocumentState.POSTGRESQL_PROVIDER);
+        final SourceRecord record = recordWithTopic(automaticTombstone, "someOtherServer.dms.Document");
+
+        final Throwable thrown = catchThrowable(() -> DocumentStateTestRecords
+                .configuredTransform(DocumentState.POSTGRESQL_PROVIDER)
+                .apply(record));
+
+        assertThat(thrown)
+                .isInstanceOf(DataException.class)
+                .isInstanceOf(DocumentState.TransformationFailureException.class);
+        final DocumentState.TransformationFailureException exception =
+                (DocumentState.TransformationFailureException) thrown;
+        assertThat(exception.reason()).isEqualTo(DocumentState.FailureReason.MISSING_SOURCE_METADATA);
+        assertThat(exception.metadata())
+                .containsEntry("provider", DocumentState.POSTGRESQL_PROVIDER)
+                .containsEntry("sourceTopic", "someOtherServer.dms.Document");
+    }
+
+    @Test
     void Given_Null_Value_Retained_Record_On_Unrecognized_Source_Topic_Should_Fail_Closed() {
         final SourceRecord automaticTombstone =
                 DocumentStateTestRecords.automaticDebeziumDeleteTombstone(
@@ -215,10 +250,7 @@ class DocumentStateTombstoneTest {
                 .configuredTransform(DocumentState.POSTGRESQL_PROVIDER)
                 .apply(record));
 
-        assertThat(thrown)
-                .isInstanceOf(DataException.class)
-                .hasMessageContaining("missing source metadata")
-                .hasMessageContaining("sourceTopic=server.dms.Document");
+        assertFailure(thrown, DocumentState.FailureReason.MISSING_DOCUMENT_KEY, "Document");
     }
 
     @ParameterizedTest
@@ -335,6 +367,33 @@ class DocumentStateTombstoneTest {
                     beforeSchema,
                     DocumentStateTestRecords.documentBeforeRow(beforeSchema, SQLSERVER_UNAVAILABLE_VALUE))
         };
+    }
+
+    private static SourceRecord recordWithKey(
+            final SourceRecord record,
+            final Schema keySchema,
+            final Object key) {
+        return new SourceRecord(
+                record.sourcePartition(),
+                record.sourceOffset(),
+                record.topic(),
+                record.kafkaPartition(),
+                keySchema,
+                key,
+                record.valueSchema(),
+                record.value());
+    }
+
+    private static SourceRecord recordWithTopic(final SourceRecord record, final String topic) {
+        return new SourceRecord(
+                record.sourcePartition(),
+                record.sourceOffset(),
+                topic,
+                record.kafkaPartition(),
+                record.keySchema(),
+                record.key(),
+                record.valueSchema(),
+                record.value());
     }
 
     private static Schema requiredPostgresqlDocumentBeforeRowSchema() {

@@ -95,6 +95,18 @@ class DocumentStateProgressTest {
         assertProgressRecordWithValue(result, record, Schema.STRING_SCHEMA, NATIVE_HEARTBEAT_PROGRESS_VALUE);
     }
 
+    @Test
+    void Given_Native_Debezium_Heartbeat_With_Null_Value_And_Value_Schema_Should_Use_Non_Null_Progress_Marker() {
+        final SourceRecord record = DocumentStateTestRecords.nativeHeartbeatRecord(
+                "__debezium-heartbeat.dms", null, null, Schema.STRING_SCHEMA, null, TIMESTAMP, headers());
+
+        final SourceRecord result = DocumentStateTestRecords
+                .configuredTransform(DocumentState.SQLSERVER_PROVIDER)
+                .apply(record);
+
+        assertProgressRecordWithValue(result, record, Schema.STRING_SCHEMA, NATIVE_HEARTBEAT_PROGRESS_VALUE);
+    }
+
     private static Stream<Object[]> retainedHeartbeatOperations() {
         return Stream.of(
                 new Object[] {DocumentState.POSTGRESQL_PROVIDER, "c"},

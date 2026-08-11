@@ -117,7 +117,7 @@ final class DocumentStateTestRecords {
         final Schema keySchema = keyStructSchema(provider);
         final Struct key = new Struct(keySchema).put(DOCUMENT_UUID_FIELD, DOCUMENT_UUID);
         return new SourceRecord(
-                sourcePartition(), sourceOffset(), "server.dms." + sourceTable, null,
+                relationalTopicSourcePartition(), sourceOffset(), "server.dms." + sourceTable, null,
                 keySchema, key, null, null);
     }
 
@@ -299,6 +299,10 @@ final class DocumentStateTestRecords {
 
     private static Map<String, String> sourcePartition() {
         return Map.of("server", "dms");
+    }
+
+    private static Map<String, String> relationalTopicSourcePartition() {
+        return Map.of("server", "server");
     }
 
     private static Map<String, Long> sourceOffset() {

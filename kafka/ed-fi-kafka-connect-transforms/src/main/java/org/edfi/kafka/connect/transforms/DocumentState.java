@@ -91,6 +91,10 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
 
     @Override
     public R apply(final R record) {
+        if (settings == null) {
+            throw transformationFailure(FailureReason.NOT_CONFIGURED, null, record, null, null);
+        }
+
         if (isAutomaticDebeziumDeleteTombstoneOnRecognizedSourceTopic(record)) {
             return null;
         }
@@ -178,21 +182,45 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
         return topic.equals(NATIVE_HEARTBEAT_TOPIC_PREFIX + sourceServer);
     }
 
-    private static boolean isAutomaticDebeziumDeleteTombstoneOnRecognizedSourceTopic(
-            final ConnectRecord<?> record) {
-        if (record.valueSchema() != null || record.value() != null
-                || record.keySchema() == null || record.key() == null) {
+    private boolean isAutomaticDebeziumDeleteTombstoneOnRecognizedSourceTopic(final ConnectRecord<?> record) {
+        if (record.valueSchema() != null || record.value() != null) {
             return false;
         }
 
-        final String topic = record.topic();
-        return topic != null
-                && (isRelationalTopic(topic, DOCUMENT_TABLE) || isRelationalTopic(topic, DOCUMENT_CACHE_TABLE));
+        final SourceTable sourceTable = automaticDebeziumDeleteTombstoneSourceTable(record);
+        if (sourceTable == null) {
+            return false;
+        }
+
+        final SourceMetadata sourceMetadata = new SourceMetadata(
+                SourceCategory.RELATIONAL, sourceTable, RELATIONAL_SCHEMA, sourceTable.tableName(),
+                settings.provider());
+        final ClassifiedRecord classifiedRecord =
+                ClassifiedRecord.relational(sourceMetadata, SourceOperation.DELETE, OutputKind.DROP);
+        settings.sourceAdapter().documentKey(record, classifiedRecord);
+        return true;
     }
 
-    private static boolean isRelationalTopic(final String topic, final String sourceTable) {
-        final String suffix = "." + RELATIONAL_SCHEMA + "." + sourceTable;
-        return topic.endsWith(suffix) && topic.length() > suffix.length();
+    private static SourceTable automaticDebeziumDeleteTombstoneSourceTable(final ConnectRecord<?> record) {
+        final String topic = record.topic();
+        final String sourceServer = DocumentStateJson.sourcePartitionServer(record);
+        if (topic == null || sourceServer == null || sourceServer.isEmpty()) {
+            return null;
+        }
+        if (isRelationalTopic(topic, sourceServer, DOCUMENT_TABLE)) {
+            return SourceTable.DOCUMENT;
+        }
+        if (isRelationalTopic(topic, sourceServer, DOCUMENT_CACHE_TABLE)) {
+            return SourceTable.DOCUMENT_CACHE;
+        }
+        return null;
+    }
+
+    private static boolean isRelationalTopic(
+            final String topic,
+            final String sourceServer,
+            final String sourceTable) {
+        return topic.equals(sourceServer + "." + RELATIONAL_SCHEMA + "." + sourceTable);
     }
 
     private static SourceOperation sourceOperation(

@@ -79,10 +79,9 @@ final class DocumentStateJson {
             final String progressKey,
             final boolean nativeHeartbeat,
             final String nativeHeartbeatProgressValue) {
-        final Schema valueSchema = nativeHeartbeat && record.valueSchema() == null && record.value() == null
-                ? Schema.STRING_SCHEMA : record.valueSchema();
-        final Object value = nativeHeartbeat && record.valueSchema() == null && record.value() == null
-                ? nativeHeartbeatProgressValue : record.value();
+        final boolean substituteNativeHeartbeatValue = nativeHeartbeat && record.value() == null;
+        final Schema valueSchema = substituteNativeHeartbeatValue ? Schema.STRING_SCHEMA : record.valueSchema();
+        final Object value = substituteNativeHeartbeatValue ? nativeHeartbeatProgressValue : record.value();
         return record.newRecord(
                 progressTopic, null, Schema.STRING_SCHEMA, progressKey, valueSchema, value, record.timestamp(),
                 record.headers());
