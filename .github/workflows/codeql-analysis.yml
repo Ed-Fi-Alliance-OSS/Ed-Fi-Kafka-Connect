@@ -14,7 +14,7 @@ on:
 permissions: read-all
 
 env:
-  # Shared DMS fixture pin; validate-dms-fixture-ref.sh keeps it main-reachable and fixture-current.
+  # Shared DMS fixture pin; validate-dms-fixture-ref.sh enforces pin correctness and reports fixture drift as warning-only.
   DMS_FIXTURE_REF: adc562b669d7b34c1a1ef9b84b53f0f93082e5f0
 
 jobs:
