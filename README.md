@@ -91,13 +91,22 @@ transforms.documentState.progress.topic=<instance document topic>.cdc-progress
 Public upserts emitted by `DocumentState` are named logical-byte values: the record has a
 required `BYTES` value schema named `org.edfi.kafka.connect.data.DocumentStateJson` at
 version `1` and a matching `byte[]` containing the complete final public JSON object. Use
-these converter settings for the relational document-state topic:
+these top-level connector settings for the relational document-state connector:
 
 ```properties
+key.converter=org.apache.kafka.connect.storage.StringConverter
 value.converter=org.edfi.kafka.connect.converters.DocumentStateJsonConverter
 value.converter.schemas.enable=false
 value.converter.decimal.format=NUMERIC
+tombstones.on.delete=false
 ```
+
+`StringConverter` is required for both public document keys and internal progress keys, so
+Kafka key bytes are plain UTF-8 strings with no JSON quoting and no Kafka Connect
+`schema` or `payload` wrapper. `tombstones.on.delete=false` is required for both
+PostgreSQL and SQL Server source connectors: `DocumentState` turns the authoritative
+`dms.Document` delete envelope into exactly one public tombstone, while Debezium's
+additional automatic tombstone is suppressed and cache deletes publish no public record.
 
 `DocumentStateJsonConverter` passes only that exact public upsert schema/value handshake
 through as a defensive byte copy, so the Kafka bytes are a plain JSON object with no
