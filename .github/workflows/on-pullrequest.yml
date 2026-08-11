@@ -12,12 +12,14 @@ on:
     paths:
       - "kafka/**"
       - ".github/**/*.yml"
+      - ".github/scripts/validate-dms-fixture-ref.sh"
   pull_request:
     branches:
       - main
     paths:
       - "kafka/**"
       - ".github/**/*.yml"
+      - ".github/scripts/validate-dms-fixture-ref.sh"
   workflow_dispatch:
 
 concurrency:
