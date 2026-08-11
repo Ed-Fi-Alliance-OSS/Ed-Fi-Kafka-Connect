@@ -128,6 +128,14 @@ final class DocumentStateJson {
     }
 
     static String sourcePartitionServer(final ConnectRecord<?> record) {
+        return sourcePartitionString(record, "server");
+    }
+
+    static String sourcePartitionDatabase(final ConnectRecord<?> record) {
+        return sourcePartitionString(record, "database");
+    }
+
+    private static String sourcePartitionString(final ConnectRecord<?> record, final String fieldName) {
         if (!(record instanceof SourceRecord)) {
             return null;
         }
@@ -137,11 +145,11 @@ final class DocumentStateJson {
             return null;
         }
 
-        final Object sourceServer = sourcePartition.get("server");
-        if (!(sourceServer instanceof String)) {
+        final Object value = sourcePartition.get(fieldName);
+        if (!(value instanceof String)) {
             return null;
         }
-        return (String) sourceServer;
+        return (String) value;
     }
 
     private static ObjectNode documentNode(

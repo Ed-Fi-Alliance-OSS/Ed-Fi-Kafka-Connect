@@ -201,16 +201,16 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
         return true;
     }
 
-    private static SourceTable automaticDebeziumDeleteTombstoneSourceTable(final ConnectRecord<?> record) {
+    private SourceTable automaticDebeziumDeleteTombstoneSourceTable(final ConnectRecord<?> record) {
         final String topic = record.topic();
         final String sourceServer = DocumentStateJson.sourcePartitionServer(record);
         if (topic == null || sourceServer == null || sourceServer.isEmpty()) {
             return null;
         }
-        if (isRelationalTopic(topic, sourceServer, DOCUMENT_TABLE)) {
+        if (isRelationalTopic(topic, sourceServer, DOCUMENT_TABLE, settings.provider(), record)) {
             return SourceTable.DOCUMENT;
         }
-        if (isRelationalTopic(topic, sourceServer, DOCUMENT_CACHE_TABLE)) {
+        if (isRelationalTopic(topic, sourceServer, DOCUMENT_CACHE_TABLE, settings.provider(), record)) {
             return SourceTable.DOCUMENT_CACHE;
         }
         return null;
@@ -219,8 +219,22 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
     private static boolean isRelationalTopic(
             final String topic,
             final String sourceServer,
-            final String sourceTable) {
-        return topic.equals(sourceServer + "." + RELATIONAL_SCHEMA + "." + sourceTable);
+            final String sourceTable,
+            final Provider provider,
+            final ConnectRecord<?> record) {
+        if (provider == Provider.POSTGRESQL) {
+            return topic.equals(sourceServer + "." + RELATIONAL_SCHEMA + "." + sourceTable);
+        }
+        if (provider == Provider.SQLSERVER) {
+            final String sourceDatabase = DocumentStateJson.sourcePartitionDatabase(record);
+            if (sourceDatabase == null || sourceDatabase.isEmpty()) {
+                return false;
+            }
+            final String expectedTopic =
+                    sourceServer + "." + sourceDatabase + "." + RELATIONAL_SCHEMA + "." + sourceTable;
+            return topic.equals(expectedTopic);
+        }
+        throw new IllegalStateException("Unsupported provider: " + provider);
     }
 
     private static SourceOperation sourceOperation(

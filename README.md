@@ -123,16 +123,21 @@ values publish as exact JSON numbers. Do not replace this with `Double`/`Float`,
 conversion, generic `JsonConverter` public upserts, Avro, Protobuf, or Schema Registry for
 the v1 document-state contract.
 
-For SQL Server source connectors, also set the Debezium source temporal mode explicitly:
+For SQL Server source connectors, also suppress consumer-facing schema-change records and
+set the Debezium source temporal mode explicitly:
 
 ```properties
+include.schema.changes=false
 time.precision.mode=isostring
 ```
 
-`DocumentState` requires `dms.DocumentCache.LastModifiedAt` to arrive as a `STRING` with
-the `io.debezium.time.IsoTimestamp` logical type. Debezium's default `adaptive` mode emits
-SQL Server `datetime2(7)` as an `INT64` `io.debezium.time.NanoTimestamp`, which is rejected
-as an unsupported retained-row field shape.
+`include.schema.changes=false` keeps SQL Server schema-change records out of the same
+connector task that runs `DocumentState`; the required internal schema history settings are
+separate and remain enabled. `DocumentState` requires `dms.DocumentCache.LastModifiedAt` to
+arrive as a `STRING` with the `io.debezium.time.IsoTimestamp` logical type. Debezium's
+default `adaptive` mode emits SQL Server `datetime2(7)` as an `INT64`
+`io.debezium.time.NanoTimestamp`, which is rejected as an unsupported retained-row field
+shape.
 
 ## Running transformations
 
