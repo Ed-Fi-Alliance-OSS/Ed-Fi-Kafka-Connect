@@ -55,3 +55,7 @@ COPY --from=parentdir LICENSE /kafka/connect/EDFI_LICENSE
 COPY --from=parentdir NOTICES.md /kafka/connect/EDFI_NOTICES.md
 
 COPY --from=build /home/gradle/src/build/libs /kafka/connect/ed-fi-kafka-connect-transforms
+
+# Kafka producer client overrides, such as producer.override.partitioner.class, are loaded
+# from the worker/client classpath rather than the isolated Connect plugin path.
+COPY --from=build /home/gradle/src/build/libs/*.jar /kafka/libs/

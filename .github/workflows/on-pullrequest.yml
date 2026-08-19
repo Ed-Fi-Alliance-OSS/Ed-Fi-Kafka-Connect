@@ -166,7 +166,18 @@ jobs:
           fi
           jar tf "$jar_path" | grep -Fx org/edfi/kafka/connect/transforms/DocumentState.class
           jar tf "$jar_path" | grep -Fx org/edfi/kafka/connect/converters/DocumentStateJsonConverter.class
-          echo "OK: DocumentState and DocumentStateJsonConverter are packaged together in $jar_path."
+          jar tf "$jar_path" | grep -Fx org/edfi/kafka/connect/partitioner/KafkaMurmur2V1Partitioner.class
+          echo "OK: DocumentState, DocumentStateJsonConverter, and KafkaMurmur2V1Partitioner are packaged together in $jar_path."
+
+      - name: Verify KafkaMurmur2 partitioner ships on the Kafka client classpath
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint bash ed-fi-kafka-connect:smoke -lc '
+            jar_path=$(find /kafka/libs -maxdepth 1 -name "ed-fi-kafka-connect-transforms-*.jar" | head -n1)
+            test -n "$jar_path"
+            jar tf "$jar_path" | grep -Fx org/edfi/kafka/connect/partitioner/KafkaMurmur2V1Partitioner.class
+          '
+          echo "OK: KafkaMurmur2V1Partitioner is available on the Kafka client classpath."
 
       # The load checks above stop at linking. Jackson is provided by the Connect runtime
       # (compileOnly in build.gradle, not bundled in the plugin jar) and is first resolved when
@@ -180,7 +191,8 @@ jobs:
           mkdir -p smoke-classes
           javac --release 17 -proc:none -cp "image-libs/*:smt-plugin/*" -d smoke-classes \
             kafka/ci-smoke/ExpandJsonExecutionSmoke.java \
-            kafka/ci-smoke/DocumentStateExecutionSmoke.java
+            kafka/ci-smoke/DocumentStateExecutionSmoke.java \
+            kafka/ci-smoke/KafkaMurmur2PartitionerExecutionSmoke.java
 
       - name: Checkout DMS shared document fixtures
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -211,6 +223,14 @@ jobs:
             ed-fi-kafka-connect:smoke \
             -cp '/smoke:/kafka/libs/*:/kafka/connect/ed-fi-kafka-connect-transforms/*' \
             DocumentStateExecutionSmoke /fixtures/school-address-property-absence
+
+      - name: Run the KafkaMurmur2 partitioner execution smoke inside the Kafka Connect 4.3 image
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD/smoke-classes:/smoke:ro" --entrypoint java \
+            ed-fi-kafka-connect:smoke \
+            -cp '/smoke:/kafka/libs/*' \
+            KafkaMurmur2PartitionerExecutionSmoke
 
   build:
     name: Build
