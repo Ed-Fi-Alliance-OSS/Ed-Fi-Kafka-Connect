@@ -172,11 +172,9 @@ jobs:
       - name: Verify KafkaMurmur2 partitioner ships on the Kafka client classpath
         run: |
           set -euo pipefail
-          docker run --rm --entrypoint bash ed-fi-kafka-connect:smoke -lc '
-            jar_path=$(find /kafka/libs -maxdepth 1 -name "ed-fi-kafka-connect-transforms-*.jar" | head -n1)
-            test -n "$jar_path"
-            jar tf "$jar_path" | grep -Fx org/edfi/kafka/connect/partitioner/KafkaMurmur2V1Partitioner.class
-          '
+          jar_path=$(find image-libs -maxdepth 1 -name "ed-fi-kafka-connect-transforms-*.jar" | head -n1)
+          test -n "$jar_path"
+          jar tf "$jar_path" | grep -Fx org/edfi/kafka/connect/partitioner/KafkaMurmur2V1Partitioner.class
           echo "OK: KafkaMurmur2V1Partitioner is available on the Kafka client classpath."
 
       # The load checks above stop at linking. Jackson is provided by the Connect runtime
