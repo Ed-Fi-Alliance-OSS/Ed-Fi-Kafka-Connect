@@ -1,0 +1,59 @@
+# SPDX-License-Identifier: Apache-2.0
+# Licensed to the Ed-Fi Alliance under one or more agreements.
+# The Ed-Fi Alliance licenses this file to you under the Apache License, Version 2.0.
+# See the LICENSE and NOTICES files in the project root for more information.
+
+# Fixed local single-worker contract. No remote JMX, dynamic rules, or rule cache.
+startDelaySeconds: 0
+lowercaseOutputName: false
+lowercaseOutputLabelNames: false
+rules:
+  - pattern: 'java.lang<type=Runtime><>StartTime(?=:|$)'
+    name: edfi_cdc_worker_start_time_seconds
+    type: GAUGE
+    valueFactor: 0.001
+  - pattern: 'java.lang<type=Memory><HeapMemoryUsage>max(?=:|$)'
+    name: edfi_cdc_worker_heap_max_bytes
+    type: GAUGE
+  - pattern: 'debezium\.(postgres|sql_server)<(?=[^>]*context=streaming)(?=[^>]*server=([^,>]+))[^>]*><>MilliSecondsBehindSource(?=:|$)'
+    name: edfi_cdc_source_lag_current_milliseconds
+    type: GAUGE
+    labels:
+      provider: "$1"
+      connector: "$2"
+  - pattern: 'debezium\.(postgres|sql_server)<(?=[^>]*context=streaming)(?=[^>]*server=([^,>]+))[^>]*><>MilliSecondsBehindSourceMinValue(?=:|$)'
+    name: edfi_cdc_source_lag_min_milliseconds
+    type: GAUGE
+    labels:
+      provider: "$1"
+      connector: "$2"
+  - pattern: 'debezium\.(postgres|sql_server)<(?=[^>]*context=streaming)(?=[^>]*server=([^,>]+))[^>]*><>MilliSecondsBehindSourceMaxValue(?=:|$)'
+    name: edfi_cdc_source_lag_max_milliseconds
+    type: GAUGE
+    labels:
+      provider: "$1"
+      connector: "$2"
+  - pattern: 'debezium\.(postgres|sql_server)<(?=[^>]*context=streaming)(?=[^>]*server=([^,>]+))[^>]*><>MilliSecondsBehindSourceAverageValue(?=:|$)'
+    name: edfi_cdc_source_lag_average_milliseconds
+    type: GAUGE
+    labels:
+      provider: "$1"
+      connector: "$2"
+  - pattern: 'debezium\.(postgres|sql_server)<(?=[^>]*context=streaming)(?=[^>]*server=([^,>]+))[^>]*><>MilliSecondsBehindSourceP50(?=:|$)'
+    name: edfi_cdc_source_lag_p50_milliseconds
+    type: GAUGE
+    labels:
+      provider: "$1"
+      connector: "$2"
+  - pattern: 'debezium\.(postgres|sql_server)<(?=[^>]*context=streaming)(?=[^>]*server=([^,>]+))[^>]*><>MilliSecondsBehindSourceP95(?=:|$)'
+    name: edfi_cdc_source_lag_p95_milliseconds
+    type: GAUGE
+    labels:
+      provider: "$1"
+      connector: "$2"
+  - pattern: 'debezium\.(postgres|sql_server)<(?=[^>]*context=streaming)(?=[^>]*server=([^,>]+))[^>]*><>MilliSecondsBehindSourceP99(?=:|$)'
+    name: edfi_cdc_source_lag_p99_milliseconds
+    type: GAUGE
+    labels:
+      provider: "$1"
+      connector: "$2"

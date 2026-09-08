@@ -59,3 +59,13 @@ COPY --from=build /home/gradle/src/build/libs /kafka/connect/ed-fi-kafka-connect
 # Kafka producer client overrides, such as producer.override.partitioner.class, are loaded
 # from the worker/client classpath rather than the isolated Connect plugin path.
 COPY --from=build /home/gradle/src/build/libs/*.jar /kafka/libs/
+
+# Standard exporter pinned independently of the Debezium base. The immutable mapping
+# lives outside /kafka/config, which existing deployments can mount as a volume.
+ADD --chown=kafka --chmod=444 --checksum=sha256:0315f3f657876302c6205a98d4036ec775dca529c5d0419ca60ee669c688239f \
+    https://github.com/prometheus/jmx_exporter/releases/download/1.5.0/jmx_prometheus_javaagent-1.5.0.jar \
+    /opt/edfi-cdc/jmx_prometheus_javaagent-1.5.0.jar
+COPY --chown=kafka --chmod=444 metrics/cdc.yaml /opt/edfi-cdc/cdc.yaml
+RUN chmod 755 /opt/edfi-cdc
+ENV KAFKA_OPTS="-javaagent:/opt/edfi-cdc/jmx_prometheus_javaagent-1.5.0.jar=9404:/opt/edfi-cdc/cdc.yaml"
+EXPOSE 9404

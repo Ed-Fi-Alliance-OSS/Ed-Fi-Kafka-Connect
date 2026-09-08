@@ -6,6 +6,11 @@
 name: Docker build and publish
 on:
   workflow_dispatch:
+    inputs:
+      dms_fixture_ref:
+        description: 'Immutable DMS commit for CDC qualification; empty keeps the ordinary pre publication.'
+        required: false
+        type: string
 
 env:
   IMAGE_NAME: ${{ vars.IMAGE_NAME }}
@@ -17,6 +22,7 @@ permissions: read-all
 
 jobs:
   docker-publish:
+    if: inputs.dms_fixture_ref == ''
     name: Publish to Docker Hub
     runs-on: ubuntu-latest
     steps:
@@ -27,7 +33,7 @@ jobs:
         id: prepare-tags
         run: |         
             IMAGETAG="${{ env.IMAGE_NAME }}:pre"
-            echo "IMAGETAG=$IMAGETAG" >> $GITHUB_OUTPUT
+            echo "IMAGETAG=$IMAGETAG" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@6524bf65af31da8d45b59e8c27de4bd072b392f5  # v3.8.0
@@ -56,3 +62,107 @@ jobs:
           tags: ${{ steps.prepare-tags.outputs.IMAGETAG }}
           labels: ${{ steps.metadatamanagementservice.outputs.labels }}
           push: true
+
+  cdc-publish:
+    if: inputs.dms_fixture_ref != ''
+    name: Publish and qualify CDC worker
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Validate immutable fixture input
+        env:
+          FIXTURE_REF: ${{ inputs.dms_fixture_ref }}
+        run: '[[ "$FIXTURE_REF" =~ ^[0-9a-f]{40}$ ]]'
+
+      - name: Checkout companion packaging
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Checkout exact DMS qualification fixtures
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: Ed-Fi-Alliance-OSS/Data-Management-Service
+          ref: ${{ inputs.dms_fixture_ref }}
+          path: dms
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@6524bf65af31da8d45b59e8c27de4bd072b392f5 # v3.8.0
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.3.0
+        with:
+          username: ${{ env.DOCKER_USERNAME }}
+          password: ${{ env.DOCKER_HUB_TOKEN }}
+
+      # Candidate namespace is never a qualification claim or an ordinary/pre rollout.
+      - name: Build immutable CDC candidate
+        id: candidate
+        uses: docker/build-push-action@b32b51a8eda65d6793cd0494a773d4f6bcef32dc # v6.11.0
+        with:
+          context: ./kafka
+          build-contexts: parentdir=./
+          file: ./kafka/Dockerfile
+          platforms: linux/amd64
+          tags: ${{ env.IMAGE_NAME }}:cdc-candidate-${{ github.sha }}
+          push: true
+          provenance: false
+          sbom: false
+
+      - name: Qualify standard exporter packaging
+        env:
+          CANDIDATE: ${{ env.IMAGE_NAME }}@${{ steps.candidate.outputs.digest }}
+        run: bash .github/scripts/verify-cdc-packaging.sh "$CANDIDATE"
+
+      - name: Setup dotnet
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Qualify real PostgreSQL and SQL Server telemetry and worker deployment
+        working-directory: dms
+        env:
+          CDC_CONNECTOR_TEMPLATE_FAIL_FAST: 'true'
+          CDC_CONNECTOR_TEMPLATE_CONNECT_IMAGE: ${{ env.IMAGE_NAME }}@${{ steps.candidate.outputs.digest }}
+          CDC_CONNECTOR_TEMPLATE_POSTGRES_IMAGE: postgres@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
+          CDC_CONNECTOR_TEMPLATE_SQLSERVER_2025_IMAGE: mcr.microsoft.com/mssql/server@sha256:86cc6144ef39bb0fbed2329e1ad79b13ee82e7b2e4739213a0db0800e668a74a
+          CDC_CONNECTOR_TEMPLATE_REDPANDA_IMAGE: docker.redpanda.com/redpandadata/redpanda@sha256:9a47c1f8d6736f98fa2616f6f0b715c051cb0bdac1a1176e38321bf45a5b572d
+        run: |
+          dotnet test src/dms/backend/EdFi.DataManagementService.Backend.Cdc.Tests.Integration/EdFi.DataManagementService.Backend.Cdc.Tests.Integration.csproj \
+            --filter 'Category=CdcConnectorTelemetryQualification' \
+            --logger 'trx;LogFileName=telemetry.trx' --results-directory ../cdc-evidence
+
+      - name: Require both providers and zero skipped qualification cases
+        run: |
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          root = ET.parse('cdc-evidence/telemetry.trx').getroot()
+          ns = {'t': 'http://microsoft.com/schemas/VisualStudio/TeamTest/2010'}
+          c = root.find('t:ResultSummary/t:Counters', ns).attrib
+          assert c['total'] == c['executed'] == c['passed'] == '2', c
+          PY
+
+      - name: Record qualified digest and immutable evidence inputs
+        env:
+          CANDIDATE: ${{ env.IMAGE_NAME }}@${{ steps.candidate.outputs.digest }}
+          FIXTURE_REF: ${{ inputs.dms_fixture_ref }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os
+          evidence = dict(image=os.environ['CANDIDATE'], companionCommit=os.environ['GITHUB_SHA'],
+              dmsFixtureCommit=os.environ['FIXTURE_REF'], runId=os.environ['GITHUB_RUN_ID'],
+              exporterVersion='1.5.0', exporterSha256='0315f3f657876302c6205a98d4036ec775dca529c5d0419ca60ee669c688239f',
+              mappingSha256=hashlib.sha256(open('kafka/metrics/cdc.yaml', 'rb').read()).hexdigest(), providers=['Postgresql', 'SqlServer'],
+              requiredLag='currentMilliseconds', optionalStatistics=['min', 'max', 'average', 'p50', 'p95', 'p99'],
+              packaging=True, connectorIsolation=True, taskRestart=True, workerRestart=True, workerInspection=True)
+          with open('cdc-evidence/qualification.json', 'w') as f:
+              json.dump(evidence, f, indent=2)
+          PY
+          echo "Qualified immutable image: $CANDIDATE" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Retain qualification evidence
+        if: always()
+        uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4.5
+        with:
+          name: cdc-image-qualification
+          path: cdc-evidence/
+          if-no-files-found: error
+          retention-days: 90

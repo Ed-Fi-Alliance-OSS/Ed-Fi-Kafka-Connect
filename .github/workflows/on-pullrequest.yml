@@ -92,6 +92,9 @@ jobs:
       - name: Build the Kafka Connect image
         run: docker build -t ed-fi-kafka-connect:smoke --build-context parentdir=. -f kafka/Dockerfile kafka
 
+      - name: Verify standard CDC exporter packaging
+        run: bash .github/scripts/verify-cdc-packaging.sh ed-fi-kafka-connect:smoke
+
       - name: Verify the built image runtime pin
         run: |
           set -euo pipefail
