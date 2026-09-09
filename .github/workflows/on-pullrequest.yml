@@ -12,14 +12,14 @@ on:
     paths:
       - "kafka/**"
       - ".github/**/*.yml"
-      - ".github/scripts/validate-dms-fixture-ref.sh"
+      - ".github/scripts/**"
   pull_request:
     branches:
       - main
     paths:
       - "kafka/**"
       - ".github/**/*.yml"
-      - ".github/scripts/validate-dms-fixture-ref.sh"
+      - ".github/scripts/**"
   workflow_dispatch:
 
 concurrency:
@@ -91,6 +91,12 @@ jobs:
       # plugin path, exactly as docker-publish.yml will at release time.
       - name: Build the Kafka Connect image
         run: docker build -t ed-fi-kafka-connect:smoke --build-context parentdir=. -f kafka/Dockerfile kafka
+
+      - name: Verify qualification gate rejects missing providers and non-passing cases
+        run: python3 .github/scripts/test_verify_cdc_qualification.py
+
+      - name: Verify standard CDC exporter packaging
+        run: bash .github/scripts/verify-cdc-packaging.sh ed-fi-kafka-connect:smoke
 
       - name: Verify the built image runtime pin
         run: |
@@ -172,10 +178,20 @@ jobs:
       - name: Verify KafkaMurmur2 partitioner ships on the Kafka client classpath
         run: |
           set -euo pipefail
-          jar_path=$(find image-libs -maxdepth 1 -name "ed-fi-kafka-connect-transforms-*.jar" | head -n1)
+          jar_path=$(find image-libs -maxdepth 1 -name "ed-fi-kafka-connect-partitioner-*.jar" | head -n1)
           test -n "$jar_path"
           jar tf "$jar_path" | grep -Fx org/edfi/kafka/connect/partitioner/KafkaMurmur2V1Partitioner.class
-          echo "OK: KafkaMurmur2V1Partitioner is available on the Kafka client classpath."
+          if jar tf "$jar_path" | grep -Eq '^(META-INF/services/|org/edfi/kafka/connect/(transforms|converters)/)'; then
+            echo "::error::The worker partitioner jar contains isolated plugin classes or service descriptors"
+            exit 1
+          fi
+          echo "OK: only the partitioner is packaged on the Kafka client classpath."
+
+      - name: Verify Connect selects isolated Ed-Fi plugin classes
+        run: |
+          docker run --rm --entrypoint java \
+            -v "$PWD/kafka/ci-smoke/PluginIsolationSmoke.java:/tmp/PluginIsolationSmoke.java:ro" \
+            ed-fi-kafka-connect:smoke -cp '/kafka/libs/*' /tmp/PluginIsolationSmoke.java
 
       # The load checks above stop at linking. Jackson is provided by the Connect runtime
       # (compileOnly in build.gradle, not bundled in the plugin jar) and is first resolved when
@@ -292,8 +308,37 @@ jobs:
           name: Package
           path: ./kafka/ed-fi-kafka-connect-transforms/build/libs
 
-      - uses: hadolint/hadolint-action@54c9adbab1582c2ef04b2016b760714a4bfde3cf # v3.1.0
-        name: Run Linter on Dockerfile
-        with:
-          dockerfile: ./kafka/Dockerfile
-          failure-threshold: error
+      # The previous action bundles Hadolint 2.12.0, which cannot parse ADD --checksum.
+      # Invoke the reviewed binary directly to avoid v3.5.0's eval-based wrapper and
+      # vulnerable Debian image. Pin the checksum and attested source/workflow commit
+      # so upstream artifact changes fail verification and upgrades require review.
+      - name: Verify and run Hadolint 2.15.1
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          hadolint_binary="$(mktemp "$RUNNER_TEMP/hadolint.XXXXXX")"
+          trap 'rm -f "$hadolint_binary"' EXIT
+
+          curl --fail --silent --show-error --location \
+            --proto '=https' \
+            --output "$hadolint_binary" \
+            https://github.com/hadolint/hadolint/releases/download/v2.15.1/hadolint-linux-x86_64
+
+          printf '%s  %s\n' \
+            'c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507' \
+            "$hadolint_binary" | sha256sum --check
+
+          gh attestation verify "$hadolint_binary" \
+            --repo hadolint/hadolint \
+            --signer-workflow hadolint/hadolint/.github/workflows/release.yml \
+            --source-digest 2eece55955ced00200be9729e9728cb7dacca505 \
+            --signer-digest 2eece55955ced00200be9729e9728cb7dacca505 \
+            --deny-self-hosted-runners
+
+          chmod 500 "$hadolint_binary"
+          env -u GH_TOKEN "$hadolint_binary" \
+            --failure-threshold error \
+            "$GITHUB_WORKSPACE/kafka/Dockerfile"

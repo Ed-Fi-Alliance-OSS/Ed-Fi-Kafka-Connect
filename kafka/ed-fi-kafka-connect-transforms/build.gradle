@@ -126,6 +126,16 @@ jar {
     }
 }
 
+// Only the producer partitioner belongs on the worker classpath. Keep SMT classes
+// and ServiceLoader manifests exclusively in the isolated Connect plugin jar.
+tasks.register('partitionerJar', Jar) {
+    archiveBaseName = 'ed-fi-kafka-connect-partitioner'
+    destinationDirectory = layout.buildDirectory.dir('partitioner')
+    from(sourceSets.main.output) {
+        include 'org/edfi/kafka/connect/partitioner/**'
+    }
+}
+
 def setVersionInGradleProperties(ver) {
     logger.quiet('Changing version in gradle.properties to {}', ver)
     file('gradle.properties.new').withWriter { writer ->

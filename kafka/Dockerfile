@@ -6,7 +6,7 @@
 FROM gradle:8.2.1-jdk-focal@sha256:89b352a0d0d40bb7294cbe5ffd4d9a8824cac6174f9ecc786c0d53ef4663863f AS build
 COPY --chown=gradle:gradle /ed-fi-kafka-connect-transforms /home/gradle/src
 WORKDIR /home/gradle/src
-RUN gradle installDist --no-daemon
+RUN gradle installDist partitionerJar --no-daemon
 
 FROM quay.io/debezium/connect:3.6.0.Final@sha256:698f0559e667a242f962221079e75917b2b7a3ad4de62661e977628da0e33b45
 LABEL maintainer="Ed-Fi Alliance, LLC and Contributors <techsupport@ed-fi.org>"
@@ -58,4 +58,20 @@ COPY --from=build /home/gradle/src/build/libs /kafka/connect/ed-fi-kafka-connect
 
 # Kafka producer client overrides, such as producer.override.partitioner.class, are loaded
 # from the worker/client classpath rather than the isolated Connect plugin path.
-COPY --from=build /home/gradle/src/build/libs/*.jar /kafka/libs/
+COPY --from=build /home/gradle/src/build/partitioner/*.jar /kafka/libs/
+
+# Standard exporter pinned independently of the Debezium base. The immutable mapping
+# lives outside /kafka/config, which existing deployments can mount as a volume.
+COPY --chown=kafka --chmod=444 metrics/exporter.env /opt/edfi-cdc/exporter.env
+COPY --chown=kafka --chmod=444 metrics/cdc.yaml /opt/edfi-cdc/cdc.yaml
+RUN chmod 755 /opt/edfi-cdc && source /opt/edfi-cdc/exporter.env && \
+    jar="/opt/edfi-cdc/jmx_prometheus_javaagent-${JMX_EXPORTER_VERSION}.jar" && \
+    curl --fail --silent --show-error --location --proto '=https' \
+        "https://github.com/prometheus/jmx_exporter/releases/download/${JMX_EXPORTER_VERSION}/jmx_prometheus_javaagent-${JMX_EXPORTER_VERSION}.jar" \
+        --output "$jar" && \
+    echo "${JMX_EXPORTER_SHA256}  ${jar}" | sha256sum --check && \
+    chmod 444 "$jar"
+COPY --chown=kafka --chmod=555 cdc-entrypoint.sh /opt/edfi-cdc/entrypoint.sh
+ENTRYPOINT ["/opt/edfi-cdc/entrypoint.sh"]
+CMD ["start"]
+EXPOSE 9404

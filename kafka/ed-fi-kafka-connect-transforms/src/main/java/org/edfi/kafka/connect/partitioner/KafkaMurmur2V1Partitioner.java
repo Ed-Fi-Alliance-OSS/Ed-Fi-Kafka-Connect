@@ -29,6 +29,8 @@ public final class KafkaMurmur2V1Partitioner implements Partitioner {
             final byte[] valueBytes,
             final Cluster cluster) {
         if (keyBytes == null) {
+            // DMS DocumentState emits validated document keys or a fixed progress key,
+            // including for native heartbeats. A fallback would hide a broken key contract.
             throw new InvalidRecordException("kafka-murmur2-v1 requires non-null serialized key bytes.");
         }
 
