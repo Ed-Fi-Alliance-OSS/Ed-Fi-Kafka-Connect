@@ -41,7 +41,7 @@ ext {
     debeziumVersion = "3.6.0.Final"
     // Match the Jackson version already shipped in the Debezium/Connect runtime image
     // so the transform relies on the runtime's Jackson (compileOnly) and bundles nothing.
-    jacksonVersion = "2.21.2"
+    jacksonVersion = "2.21.5"
 }
 
 distributions {
@@ -93,15 +93,15 @@ dependencies {
     testImplementation "org.apache.kafka:kafka-clients:$kafkaVersion"
     testImplementation "org.apache.kafka:connect-api:$kafkaVersion"
     testImplementation "io.debezium:debezium-api:$debeziumVersion"
-    testImplementation "org.assertj:assertj-core:3.24.2"
+    testImplementation "org.assertj:assertj-core:3.27.7"
     // Test runtime needs Jackson (compileOnly above is not on the test classpath) and
     // connect-json for the JsonConverter round-trip that verifies the serialized shape.
     testImplementation "com.fasterxml.jackson.core:jackson-databind:$jacksonVersion"
     testImplementation "org.apache.kafka:connect-json:$kafkaVersion"
 
-    testRuntimeOnly "org.apache.logging.log4j:log4j-slf4j-impl:2.25.4"
-    testRuntimeOnly "org.apache.logging.log4j:log4j-api:2.25.4"
-    testRuntimeOnly "org.apache.logging.log4j:log4j-core:2.25.4"
+    testRuntimeOnly "org.apache.logging.log4j:log4j-slf4j-impl:2.25.5"
+    testRuntimeOnly "org.apache.logging.log4j:log4j-api:2.25.5"
+    testRuntimeOnly "org.apache.logging.log4j:log4j-core:2.25.5"
 }
 
 checkstyle {
