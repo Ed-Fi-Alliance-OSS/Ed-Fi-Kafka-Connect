@@ -295,8 +295,37 @@ jobs:
           name: Package
           path: ./kafka/ed-fi-kafka-connect-transforms/build/libs
 
-      - uses: hadolint/hadolint-action@54c9adbab1582c2ef04b2016b760714a4bfde3cf # v3.1.0
-        name: Run Linter on Dockerfile
-        with:
-          dockerfile: ./kafka/Dockerfile
-          failure-threshold: error
+      # The previous action bundles Hadolint 2.12.0, which cannot parse ADD --checksum.
+      # Invoke the reviewed binary directly to avoid v3.5.0's eval-based wrapper and
+      # vulnerable Debian image. Pin the checksum and attested source/workflow commit
+      # so upstream artifact changes fail verification and upgrades require review.
+      - name: Verify and run Hadolint 2.15.1
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          hadolint_binary="$(mktemp "$RUNNER_TEMP/hadolint.XXXXXX")"
+          trap 'rm -f "$hadolint_binary"' EXIT
+
+          curl --fail --silent --show-error --location \
+            --proto '=https' \
+            --output "$hadolint_binary" \
+            https://github.com/hadolint/hadolint/releases/download/v2.15.1/hadolint-linux-x86_64
+
+          printf '%s  %s\n' \
+            'c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507' \
+            "$hadolint_binary" | sha256sum --check
+
+          gh attestation verify "$hadolint_binary" \
+            --repo hadolint/hadolint \
+            --signer-workflow hadolint/hadolint/.github/workflows/release.yml \
+            --source-digest 2eece55955ced00200be9729e9728cb7dacca505 \
+            --signer-digest 2eece55955ced00200be9729e9728cb7dacca505 \
+            --deny-self-hosted-runners
+
+          chmod 500 "$hadolint_binary"
+          env -u GH_TOKEN "$hadolint_binary" \
+            --failure-threshold error \
+            "$GITHUB_WORKSPACE/kafka/Dockerfile"
