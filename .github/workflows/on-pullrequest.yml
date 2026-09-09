@@ -12,14 +12,14 @@ on:
     paths:
       - "kafka/**"
       - ".github/**/*.yml"
-      - ".github/scripts/validate-dms-fixture-ref.sh"
+      - ".github/scripts/**"
   pull_request:
     branches:
       - main
     paths:
       - "kafka/**"
       - ".github/**/*.yml"
-      - ".github/scripts/validate-dms-fixture-ref.sh"
+      - ".github/scripts/**"
   workflow_dispatch:
 
 concurrency:
@@ -91,6 +91,9 @@ jobs:
       # plugin path, exactly as docker-publish.yml will at release time.
       - name: Build the Kafka Connect image
         run: docker build -t ed-fi-kafka-connect:smoke --build-context parentdir=. -f kafka/Dockerfile kafka
+
+      - name: Verify qualification gate rejects missing providers and non-passing cases
+        run: python3 .github/scripts/test_verify_cdc_qualification.py
 
       - name: Verify standard CDC exporter packaging
         run: bash .github/scripts/verify-cdc-packaging.sh ed-fi-kafka-connect:smoke
@@ -175,10 +178,20 @@ jobs:
       - name: Verify KafkaMurmur2 partitioner ships on the Kafka client classpath
         run: |
           set -euo pipefail
-          jar_path=$(find image-libs -maxdepth 1 -name "ed-fi-kafka-connect-transforms-*.jar" | head -n1)
+          jar_path=$(find image-libs -maxdepth 1 -name "ed-fi-kafka-connect-partitioner-*.jar" | head -n1)
           test -n "$jar_path"
           jar tf "$jar_path" | grep -Fx org/edfi/kafka/connect/partitioner/KafkaMurmur2V1Partitioner.class
-          echo "OK: KafkaMurmur2V1Partitioner is available on the Kafka client classpath."
+          if jar tf "$jar_path" | grep -Eq '^(META-INF/services/|org/edfi/kafka/connect/(transforms|converters)/)'; then
+            echo "::error::The worker partitioner jar contains isolated plugin classes or service descriptors"
+            exit 1
+          fi
+          echo "OK: only the partitioner is packaged on the Kafka client classpath."
+
+      - name: Verify Connect selects isolated Ed-Fi plugin classes
+        run: |
+          docker run --rm --entrypoint java \
+            -v "$PWD/kafka/ci-smoke/PluginIsolationSmoke.java:/tmp/PluginIsolationSmoke.java:ro" \
+            ed-fi-kafka-connect:smoke -cp '/kafka/libs/*' /tmp/PluginIsolationSmoke.java
 
       # The load checks above stop at linking. Jackson is provided by the Connect runtime
       # (compileOnly in build.gradle, not bundled in the plugin jar) and is first resolved when

@@ -110,7 +110,15 @@ jobs:
       - name: Qualify standard exporter packaging
         env:
           CANDIDATE: ${{ env.IMAGE_NAME }}@${{ steps.candidate.outputs.digest }}
-        run: bash .github/scripts/verify-cdc-packaging.sh "$CANDIDATE"
+        run: bash .github/scripts/verify-cdc-packaging.sh "$CANDIDATE" cdc-evidence/packaging.json
+
+      - name: Verify candidate plugin isolation
+        env:
+          CANDIDATE: ${{ env.IMAGE_NAME }}@${{ steps.candidate.outputs.digest }}
+        run: |
+          docker run --rm --entrypoint java \
+            -v "$PWD/kafka/ci-smoke/PluginIsolationSmoke.java:/tmp/PluginIsolationSmoke.java:ro" \
+            "$CANDIDATE" -cp '/kafka/libs/*' /tmp/PluginIsolationSmoke.java
 
       - name: Setup dotnet
         uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
@@ -131,14 +139,7 @@ jobs:
             --logger 'trx;LogFileName=telemetry.trx' --results-directory ../cdc-evidence
 
       - name: Require both providers and zero skipped qualification cases
-        run: |
-          python3 - <<'PY'
-          import xml.etree.ElementTree as ET
-          root = ET.parse('cdc-evidence/telemetry.trx').getroot()
-          ns = {'t': 'http://microsoft.com/schemas/VisualStudio/TeamTest/2010'}
-          c = root.find('t:ResultSummary/t:Counters', ns).attrib
-          assert c['total'] == c['executed'] == c['passed'] == '2', c
-          PY
+        run: python3 .github/scripts/verify-cdc-qualification.py cdc-evidence/telemetry.trx
 
       - name: Record qualified digest and immutable evidence inputs
         env:
@@ -146,11 +147,12 @@ jobs:
           FIXTURE_REF: ${{ inputs.dms_fixture_ref }}
         run: |
           python3 - <<'PY'
-          import hashlib, json, os
+          import json, os
+          with open('cdc-evidence/packaging.json') as f:
+              packaging = json.load(f)
           evidence = dict(image=os.environ['CANDIDATE'], companionCommit=os.environ['GITHUB_SHA'],
               dmsFixtureCommit=os.environ['FIXTURE_REF'], runId=os.environ['GITHUB_RUN_ID'],
-              exporterVersion='1.5.0', exporterSha256='0315f3f657876302c6205a98d4036ec775dca529c5d0419ca60ee669c688239f',
-              mappingSha256=hashlib.sha256(open('kafka/metrics/cdc.yaml', 'rb').read()).hexdigest(), providers=['Postgresql', 'SqlServer'],
+              **packaging, providers=['Postgresql', 'SqlServer'],
               requiredLag='currentMilliseconds', optionalStatistics=['min', 'max', 'average', 'p50', 'p95', 'p99'],
               packaging=True, connectorIsolation=True, taskRestart=True, workerRestart=True, workerInspection=True)
           with open('cdc-evidence/qualification.json', 'w') as f:
@@ -159,7 +161,7 @@ jobs:
           echo "Qualified immutable image: $CANDIDATE" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Retain qualification evidence
-        if: always()
+        if: always() && hashFiles('cdc-evidence/**') != ''
         uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4.5
         with:
           name: cdc-image-qualification
