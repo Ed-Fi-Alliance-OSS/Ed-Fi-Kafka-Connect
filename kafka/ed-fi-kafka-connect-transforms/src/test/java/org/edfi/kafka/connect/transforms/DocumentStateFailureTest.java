@@ -7,8 +7,10 @@ package org.edfi.kafka.connect.transforms;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.stream.Stream;
 
 import org.apache.kafka.common.config.ConfigException;
+import org.apache.kafka.connect.data.Field;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.data.Struct;
@@ -16,6 +18,8 @@ import org.apache.kafka.connect.errors.DataException;
 import org.apache.kafka.connect.source.SourceRecord;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -109,6 +113,62 @@ class DocumentStateFailureTest {
         assertThat(exception.getMessage())
                 .doesNotContain("DocumentJson")
                 .doesNotContain("super-secret");
+    }
+
+    @ParameterizedTest
+    @MethodSource("providers")
+    void Given_Missing_ContentCreatedAt_Should_Fail_Before_DocumentJson_Is_Read(final String provider) {
+        assertContentCreatedAtFailsFirst(provider, DocumentStateTestRecords
+                .cacheRowBuilder(provider)
+                .omit(DocumentStateTestRecords.CONTENT_CREATED_AT_FIELD));
+    }
+
+    @ParameterizedTest
+    @MethodSource("providers")
+    void Given_Null_ContentCreatedAt_Should_Fail_Before_DocumentJson_Is_Read(final String provider) {
+        assertContentCreatedAtFailsFirst(provider, DocumentStateTestRecords
+                .cacheRowBuilder(provider)
+                .field(DocumentStateTestRecords.CONTENT_CREATED_AT_FIELD,
+                        DocumentStateTestRecords.timestampSchema(provider), null));
+    }
+
+    private static Stream<String> providers() {
+        return Stream.of(DocumentState.POSTGRESQL_PROVIDER, DocumentState.SQLSERVER_PROVIDER);
+    }
+
+    // Malformed DocumentJson would fail with INVALID_DOCUMENT_JSON if it were read first.
+    private static void assertContentCreatedAtFailsFirst(
+            final String provider,
+            final DocumentStateTestRecords.CacheRowBuilder builder) {
+        final Struct after = withRequiredNullsAllowed(builder
+                .field(DocumentStateTestRecords.DOCUMENT_JSON_FIELD,
+                        DocumentStateTestRecords.documentJsonSchema(provider), "{")
+                .build());
+
+        final Throwable thrown = catchThrowable(() -> DocumentStateTestRecords
+                .configuredTransform(provider)
+                .apply(DocumentStateTestRecords.documentCacheRecord(provider, after)));
+
+        assertThat(thrown).isInstanceOf(DocumentState.TransformationFailureException.class);
+        assertThat(((DocumentState.TransformationFailureException) thrown).reason())
+                .isEqualTo(DocumentState.FailureReason.MISSING_REQUIRED_FIELD);
+    }
+
+    // A source row can carry null in a required column, but Struct.put on the parent envelope validates
+    // children first. As in the DMS message-contract runner, skip only that construction-time check.
+    private static Struct withRequiredNullsAllowed(final Struct row) {
+        final Struct copy = new Struct(row.schema()) {
+            @Override
+            public void validate() {
+            }
+        };
+        for (final Field field : row.schema().fields()) {
+            final Object value = row.getWithoutDefault(field.name());
+            if (value != null) {
+                copy.put(field, value);
+            }
+        }
+        return copy;
     }
 
     private static DocumentState<SourceRecord> configuredTransform() {

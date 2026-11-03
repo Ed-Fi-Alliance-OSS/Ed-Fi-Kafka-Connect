@@ -329,6 +329,7 @@ public final class DocumentStateExecutionSmoke {
                 222L,
                 "222-01234567.j._.l.i",
                 "2026-07-30T14:15:16.123456Z",
+                "2025-03-04T05:06:10.654330Z",
                 documentJson);
     }
 
@@ -340,6 +341,7 @@ public final class DocumentStateExecutionSmoke {
             final long contentVersion,
             final String streamEtag,
             final String lastModifiedAt,
+            final String contentCreatedAt,
             final String documentJson) {
         final Schema schema = SchemaBuilder.struct()
                 .name("server.dms." + POSTGRESQL_SOURCE_SCHEMA + ".DocumentCache.Value")
@@ -351,6 +353,7 @@ public final class DocumentStateExecutionSmoke {
                 .field("ContentVersion", Schema.INT64_SCHEMA)
                 .field("StreamEtag", Schema.STRING_SCHEMA)
                 .field("LastModifiedAt", postgresqlTimestampSchema())
+                .field("ContentCreatedAt", postgresqlTimestampSchema())
                 .field("DocumentJson", postgresqlJsonSchema())
                 .build();
         return new Struct(schema)
@@ -361,6 +364,7 @@ public final class DocumentStateExecutionSmoke {
                 .put("ContentVersion", contentVersion)
                 .put("StreamEtag", streamEtag)
                 .put("LastModifiedAt", lastModifiedAt)
+                .put("ContentCreatedAt", contentCreatedAt)
                 .put("DocumentJson", documentJson);
     }
 
@@ -468,6 +472,12 @@ public final class DocumentStateExecutionSmoke {
                 detail + " contentVersion");
         expect(sharedFixture.normalizedLastModifiedAt().equals(root.get("lastModifiedAt").textValue()),
                 detail + " lastModifiedAt");
+        expect(sharedFixture.expectedDocumentCreatedAt().equals(root.get("documentCreatedAt").textValue()),
+                detail + " documentCreatedAt = " + root.get("documentCreatedAt"));
+        final JsonNode document = root.get("document");
+        expect(!document.has("documentCreatedAt") && !document.has("ContentCreatedAt")
+                        && !document.has("_createdDate"),
+                detail + " document has no creation-time property");
     }
 
     private static SharedCacheFixture sharedCacheFixture(final Path fixtureDirectory) throws IOException {
@@ -485,6 +495,7 @@ public final class DocumentStateExecutionSmoke {
                 cacheRow.get("contentVersion").longValue(),
                 cacheRow.get("streamEtag").textValue(),
                 cacheRow.get("lastModifiedAt").textValue(),
+                cacheRow.get("contentCreatedAt").textValue(),
                 MAPPER.writeValueAsString(cacheRow.get("documentJson")),
                 expectedPublicDocument);
     }
@@ -516,6 +527,7 @@ public final class DocumentStateExecutionSmoke {
         private final String resourceName;
         private final String resourceVersion;
         private final long contentVersion;
+        private final String expectedDocumentCreatedAt;
         private final JsonNode expectedPublicDocument;
         private final Struct cacheRow;
 
@@ -527,6 +539,7 @@ public final class DocumentStateExecutionSmoke {
                 final long contentVersion,
                 final String streamEtag,
                 final String lastModifiedAt,
+                final String contentCreatedAt,
                 final String documentJson,
                 final JsonNode expectedPublicDocument) {
             this.documentUuid = documentUuid;
@@ -534,6 +547,11 @@ public final class DocumentStateExecutionSmoke {
             this.resourceName = resourceName;
             this.resourceVersion = resourceVersion;
             this.contentVersion = contentVersion;
+            // Cut the fixture's raw UTC text to whole seconds: string truncation can never round.
+            expect(contentCreatedAt != null && contentCreatedAt.length() > 20
+                            && contentCreatedAt.charAt(19) == '.' && contentCreatedAt.endsWith("Z"),
+                    "shared fixture contentCreatedAt is fractional UTC text");
+            this.expectedDocumentCreatedAt = contentCreatedAt.substring(0, 19) + "Z";
             this.expectedPublicDocument = expectedPublicDocument;
             this.cacheRow = DocumentStateExecutionSmoke.cacheRow(
                     documentUuid,
@@ -543,6 +561,7 @@ public final class DocumentStateExecutionSmoke {
                     contentVersion,
                     streamEtag,
                     lastModifiedAt,
+                    contentCreatedAt,
                     documentJson);
         }
 
@@ -564,6 +583,10 @@ public final class DocumentStateExecutionSmoke {
 
         long contentVersion() {
             return contentVersion;
+        }
+
+        String expectedDocumentCreatedAt() {
+            return expectedDocumentCreatedAt;
         }
 
         String normalizedLastModifiedAt() {

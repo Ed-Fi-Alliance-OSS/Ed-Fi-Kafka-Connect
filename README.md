@@ -140,11 +140,19 @@ time.precision.mode=isostring
 
 `include.schema.changes=false` keeps SQL Server schema-change records out of the same
 connector task that runs `DocumentState`; the required internal schema history settings are
-separate and remain enabled. `DocumentState` requires `dms.DocumentCache.LastModifiedAt` to
-arrive as a `STRING` with the `io.debezium.time.IsoTimestamp` logical type. Debezium's
-default `adaptive` mode emits SQL Server `datetime2(7)` as an `INT64`
+separate and remain enabled. `DocumentState` requires both retained temporal columns,
+`dms.DocumentCache.LastModifiedAt` and `dms.DocumentCache.ContentCreatedAt`, to arrive as
+non-optional `STRING` values with a version 1 Debezium logical type:
+`io.debezium.time.IsoTimestamp` from SQL Server and `io.debezium.time.ZonedTimestamp` from
+PostgreSQL. Debezium's default `adaptive` mode emits SQL Server `datetime2(7)` as an `INT64`
 `io.debezium.time.NanoTimestamp`, which is rejected as an unsupported retained-row field
 shape.
+
+Both values must be UTC. The transform publishes them as `lastModifiedAt` and
+`documentCreatedAt`, truncated (never rounded) to whole seconds in `yyyy-MM-ddTHH:mm:ssZ`.
+A missing, null, malformed, non-UTC or unavailable value fails the record; it is never
+replaced with the current time. `documentCreatedAt` appears only in the envelope, not in
+the embedded `document`.
 
 ## Running transformations
 

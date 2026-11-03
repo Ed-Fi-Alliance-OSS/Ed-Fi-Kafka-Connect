@@ -103,7 +103,9 @@ class DocumentStateSharedFixtureTest {
         assertField(afterSchema, DocumentStateTestRecords.DOCUMENT_JSON_FIELD, Schema.Type.STRING,
                 documentJsonSchemaName(provider));
         assertField(afterSchema, DocumentStateTestRecords.LAST_MODIFIED_AT_FIELD, Schema.Type.STRING,
-                lastModifiedAtSchemaName(provider));
+                timestampSchemaName(provider));
+        assertField(afterSchema, DocumentStateTestRecords.CONTENT_CREATED_AT_FIELD, Schema.Type.STRING,
+                timestampSchemaName(provider));
         assertField(afterSchema, DocumentStateTestRecords.CONTENT_VERSION_FIELD, Schema.Type.INT64, null);
     }
 
@@ -331,7 +333,7 @@ class DocumentStateSharedFixtureTest {
         return null;
     }
 
-    private static String lastModifiedAtSchemaName(final String provider) {
+    private static String timestampSchemaName(final String provider) {
         if (DocumentState.POSTGRESQL_PROVIDER.equals(provider)) {
             return DocumentStateTestRecords.POSTGRESQL_TIMESTAMP_SCHEMA;
         }
@@ -381,6 +383,7 @@ class DocumentStateSharedFixtureTest {
                 + "\"resourceVersion\":\"1.0\","
                 + "\"contentVersion\":" + contentVersionValue + ","
                 + "\"lastModifiedAt\":\"2026-07-30T14:15:16.123456Z\","
+                + "\"contentCreatedAt\":\"2025-03-04T05:06:10.654330Z\","
                 + "\"streamEtag\":\"222-01234567.j._.l.i\""
                 + documentJsonEntry
                 + "}";

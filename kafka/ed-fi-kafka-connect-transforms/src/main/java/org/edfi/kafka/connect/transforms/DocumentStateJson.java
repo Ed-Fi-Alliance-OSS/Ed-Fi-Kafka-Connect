@@ -38,6 +38,7 @@ final class DocumentStateJson {
     private static final String PUBLIC_RESOURCE_VERSION_FIELD = "resourceVersion";
     private static final String PUBLIC_CONTENT_VERSION_FIELD = "contentVersion";
     private static final String PUBLIC_LAST_MODIFIED_AT_FIELD = "lastModifiedAt";
+    private static final String PUBLIC_DOCUMENT_CREATED_AT_FIELD = "documentCreatedAt";
     private static final String PUBLIC_DOCUMENT_FIELD = "document";
     private static final String PUBLIC_DOCUMENT_ID_FIELD = "id";
     private static final String PUBLIC_DOCUMENT_ETAG_FIELD = "_etag";
@@ -104,23 +105,25 @@ final class DocumentStateJson {
         envelope.put(PUBLIC_RESOURCE_VERSION_FIELD, row.resourceVersion());
         envelope.put(PUBLIC_CONTENT_VERSION_FIELD, row.contentVersion());
         envelope.put(PUBLIC_LAST_MODIFIED_AT_FIELD, row.lastModifiedAt());
+        envelope.put(PUBLIC_DOCUMENT_CREATED_AT_FIELD, row.contentCreatedAt());
         envelope.set(PUBLIC_DOCUMENT_FIELD, documentNode);
         return new ByteBackedValue(DocumentStateJsonConverter.publicValueSchema(),
                 serializedEnvelope(envelope, record, classifiedRecord));
     }
 
-    static String normalizeLastModifiedAt(
+    static String normalizeTimestamp(
             final String value,
+            final DocumentState.FailureReason invalidValueReason,
             final ConnectRecord<?> record,
             final DocumentState.ClassifiedRecord classifiedRecord) {
         final OffsetDateTime timestamp;
         try {
             timestamp = OffsetDateTime.parse(value);
         } catch (final DateTimeParseException e) {
-            throw failure(DocumentState.FailureReason.INVALID_LAST_MODIFIED_AT, record, classifiedRecord);
+            throw failure(invalidValueReason, record, classifiedRecord);
         }
         if (!ZoneOffset.UTC.equals(timestamp.getOffset())) {
-            throw failure(DocumentState.FailureReason.INVALID_LAST_MODIFIED_AT, record, classifiedRecord);
+            throw failure(invalidValueReason, record, classifiedRecord);
         }
 
         final Instant wholeSecondInstant = timestamp.toInstant().truncatedTo(ChronoUnit.SECONDS);
