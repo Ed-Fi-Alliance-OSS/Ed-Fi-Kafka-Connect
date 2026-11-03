@@ -27,6 +27,7 @@ class DocumentStateTimestampTest {
     private static final String LAST_MODIFIED_AT = DocumentStateTestRecords.LAST_MODIFIED_AT_FIELD;
     private static final String CONTENT_CREATED_AT = DocumentStateTestRecords.CONTENT_CREATED_AT_FIELD;
     private static final String VALID_TIMESTAMP = "2026-07-30T14:15:16Z";
+    private static final String DEBEZIUM_UNAVAILABLE_VALUE = "__debezium_unavailable_value";
 
     @ParameterizedTest
     @MethodSource("validTimestampRows")
@@ -138,12 +139,13 @@ class DocumentStateTimestampTest {
                         DocumentState.FailureReason.UNSUPPORTED_REQUIRED_FIELD_SHAPE));
     }
 
-    /** Malformed, non-UTC and offset-less values each fail with the field's own reason. */
+    /** Malformed, non-UTC, offset-less, empty and unavailable-marker values fail with the field's own reason. */
     private static Stream<Object[]> invalidValueRows(final String field, final String provider) {
         final DocumentState.FailureReason reason = LAST_MODIFIED_AT.equals(field)
                 ? DocumentState.FailureReason.INVALID_LAST_MODIFIED_AT
                 : DocumentState.FailureReason.INVALID_CONTENT_CREATED_AT;
-        return Stream.of("not-a-timestamp", "2026-07-30T09:15:16-05:00", "2026-07-30T14:15:16")
+        return Stream.of("not-a-timestamp", "2026-07-30T09:15:16-05:00", "2026-07-30T14:15:16", "",
+                        DEBEZIUM_UNAVAILABLE_VALUE)
                 .map(value -> invalidTimestamp(
                         field, provider, DocumentStateTestRecords.timestampSchema(provider), value, reason));
     }

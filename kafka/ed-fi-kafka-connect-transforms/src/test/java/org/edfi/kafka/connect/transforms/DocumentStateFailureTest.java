@@ -7,6 +7,7 @@ package org.edfi.kafka.connect.transforms;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.stream.Stream;
 
 import org.apache.kafka.common.config.ConfigException;
 import org.apache.kafka.connect.data.Field;
@@ -17,6 +18,8 @@ import org.apache.kafka.connect.errors.DataException;
 import org.apache.kafka.connect.source.SourceRecord;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -112,30 +115,39 @@ class DocumentStateFailureTest {
                 .doesNotContain("super-secret");
     }
 
-    @Test
-    void Given_Missing_ContentCreatedAt_Should_Fail_Before_DocumentJson_Is_Read() {
-        assertContentCreatedAtFailsFirst(DocumentStateTestRecords
-                .cacheRowBuilder(DocumentState.POSTGRESQL_PROVIDER)
+    @ParameterizedTest
+    @MethodSource("providers")
+    void Given_Missing_ContentCreatedAt_Should_Fail_Before_DocumentJson_Is_Read(final String provider) {
+        assertContentCreatedAtFailsFirst(provider, DocumentStateTestRecords
+                .cacheRowBuilder(provider)
                 .omit(DocumentStateTestRecords.CONTENT_CREATED_AT_FIELD));
     }
 
-    @Test
-    void Given_Null_ContentCreatedAt_Should_Fail_Before_DocumentJson_Is_Read() {
-        assertContentCreatedAtFailsFirst(DocumentStateTestRecords
-                .cacheRowBuilder(DocumentState.POSTGRESQL_PROVIDER)
+    @ParameterizedTest
+    @MethodSource("providers")
+    void Given_Null_ContentCreatedAt_Should_Fail_Before_DocumentJson_Is_Read(final String provider) {
+        assertContentCreatedAtFailsFirst(provider, DocumentStateTestRecords
+                .cacheRowBuilder(provider)
                 .field(DocumentStateTestRecords.CONTENT_CREATED_AT_FIELD,
-                        DocumentStateTestRecords.timestampSchema(DocumentState.POSTGRESQL_PROVIDER), null));
+                        DocumentStateTestRecords.timestampSchema(provider), null));
+    }
+
+    private static Stream<String> providers() {
+        return Stream.of(DocumentState.POSTGRESQL_PROVIDER, DocumentState.SQLSERVER_PROVIDER);
     }
 
     // Malformed DocumentJson would fail with INVALID_DOCUMENT_JSON if it were read first.
-    private static void assertContentCreatedAtFailsFirst(final DocumentStateTestRecords.CacheRowBuilder builder) {
+    private static void assertContentCreatedAtFailsFirst(
+            final String provider,
+            final DocumentStateTestRecords.CacheRowBuilder builder) {
         final Struct after = withRequiredNullsAllowed(builder
                 .field(DocumentStateTestRecords.DOCUMENT_JSON_FIELD,
-                        DocumentStateTestRecords.documentJsonSchema(DocumentState.POSTGRESQL_PROVIDER), "{")
+                        DocumentStateTestRecords.documentJsonSchema(provider), "{")
                 .build());
 
-        final Throwable thrown = catchThrowable(() -> configuredTransform()
-                .apply(DocumentStateTestRecords.documentCacheRecord(DocumentState.POSTGRESQL_PROVIDER, after)));
+        final Throwable thrown = catchThrowable(() -> DocumentStateTestRecords
+                .configuredTransform(provider)
+                .apply(DocumentStateTestRecords.documentCacheRecord(provider, after)));
 
         assertThat(thrown).isInstanceOf(DocumentState.TransformationFailureException.class);
         assertThat(((DocumentState.TransformationFailureException) thrown).reason())
