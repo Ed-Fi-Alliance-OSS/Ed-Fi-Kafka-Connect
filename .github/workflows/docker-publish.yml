@@ -125,6 +125,20 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
+      # The DMS Telemetry lane runs the marked operator runbook inspections, which need native
+      # curl 8.4+, timeout, psql and Go sqlcmd (docs/CDC-QUALIFICATION.md). Mirror the DMS
+      # nightly-cdc-qualification.yml installs instead of relying on the runner image.
+      - name: Install bounded telemetry inspection clients
+        run: sudo apt-get update && sudo apt-get install -y curl postgresql-client
+
+      - name: Install SQL Server bounded inspection client
+        run: |
+          curl --fail --location --output "$RUNNER_TEMP/sqlcmd.tar.bz2" https://github.com/microsoft/go-sqlcmd/releases/download/v1.10.0/sqlcmd-linux-amd64.tar.bz2
+          echo "92516d98c63d99b0994de5b61350c91f6915f9b76f139a59039fbcb225c2e987  $RUNNER_TEMP/sqlcmd.tar.bz2" | sha256sum --check
+          mkdir -p "$RUNNER_TEMP/sqlcmd"
+          tar -xjf "$RUNNER_TEMP/sqlcmd.tar.bz2" -C "$RUNNER_TEMP/sqlcmd"
+          echo "$RUNNER_TEMP/sqlcmd" >> "$GITHUB_PATH"
+
       - name: Qualify real PostgreSQL and SQL Server telemetry and worker deployment
         working-directory: dms
         env:
