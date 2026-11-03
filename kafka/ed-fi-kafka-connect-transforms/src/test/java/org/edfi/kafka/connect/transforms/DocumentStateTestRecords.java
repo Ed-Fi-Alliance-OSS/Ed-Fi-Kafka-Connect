@@ -37,6 +37,7 @@ final class DocumentStateTestRecords {
     static final String CONTENT_VERSION_FIELD = "ContentVersion";
     static final String STREAM_ETAG_FIELD = "StreamEtag";
     static final String LAST_MODIFIED_AT_FIELD = "LastModifiedAt";
+    static final String CONTENT_CREATED_AT_FIELD = "ContentCreatedAt";
     static final String DOCUMENT_JSON_FIELD = "DocumentJson";
 
     private DocumentStateTestRecords() {
@@ -53,7 +54,12 @@ final class DocumentStateTestRecords {
     }
 
     static SourceRecord documentCacheRecord(final String provider, final Struct after) {
-        return documentCacheRecord(provider, DOCUMENT_UUID, after, null, new ConnectHeaders());
+        return documentCacheRecord(provider, after, "c");
+    }
+
+    static SourceRecord documentCacheRecord(final String provider, final Struct after, final String operation) {
+        return relationalRecord(provider, "DocumentCache", operation, DOCUMENT_UUID, after.schema(), after, null,
+                new ConnectHeaders());
     }
 
     static SourceRecord documentCacheRecordWithPublicMetadata(
@@ -172,7 +178,7 @@ final class DocumentStateTestRecords {
         return Schema.STRING_SCHEMA;
     }
 
-    static Schema lastModifiedAtSchema(final String provider) {
+    static Schema timestampSchema(final String provider) {
         if (DocumentState.POSTGRESQL_PROVIDER.equals(provider)) {
             return SchemaBuilder.string()
                     .name(POSTGRESQL_TIMESTAMP_SCHEMA)
@@ -332,7 +338,9 @@ final class DocumentStateTestRecords {
             field(RESOURCE_VERSION_FIELD, Schema.STRING_SCHEMA, "1.0");
             field(CONTENT_VERSION_FIELD, Schema.INT64_SCHEMA, 222L);
             field(STREAM_ETAG_FIELD, Schema.STRING_SCHEMA, "222-01234567.j._.l.i");
-            field(LAST_MODIFIED_AT_FIELD, lastModifiedAtSchema(provider), "2026-07-30T14:15:16.123456Z");
+            field(LAST_MODIFIED_AT_FIELD, timestampSchema(provider), "2026-07-30T14:15:16.123456Z");
+            // Distinct from LastModifiedAt so a crossed field mapping cannot pass unnoticed.
+            field(CONTENT_CREATED_AT_FIELD, timestampSchema(provider), "2025-03-04T05:06:10.654330Z");
             field(DOCUMENT_JSON_FIELD, documentJsonSchema(provider), defaultDocumentJson(DOCUMENT_UUID));
         }
 

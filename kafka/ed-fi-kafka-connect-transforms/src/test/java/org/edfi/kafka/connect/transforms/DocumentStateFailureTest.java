@@ -9,6 +9,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import org.apache.kafka.common.config.ConfigException;
+import org.apache.kafka.connect.data.Field;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.data.Struct;
@@ -109,6 +110,53 @@ class DocumentStateFailureTest {
         assertThat(exception.getMessage())
                 .doesNotContain("DocumentJson")
                 .doesNotContain("super-secret");
+    }
+
+    @Test
+    void Given_Missing_ContentCreatedAt_Should_Fail_Before_DocumentJson_Is_Read() {
+        assertContentCreatedAtFailsFirst(DocumentStateTestRecords
+                .cacheRowBuilder(DocumentState.POSTGRESQL_PROVIDER)
+                .omit(DocumentStateTestRecords.CONTENT_CREATED_AT_FIELD));
+    }
+
+    @Test
+    void Given_Null_ContentCreatedAt_Should_Fail_Before_DocumentJson_Is_Read() {
+        assertContentCreatedAtFailsFirst(DocumentStateTestRecords
+                .cacheRowBuilder(DocumentState.POSTGRESQL_PROVIDER)
+                .field(DocumentStateTestRecords.CONTENT_CREATED_AT_FIELD,
+                        DocumentStateTestRecords.timestampSchema(DocumentState.POSTGRESQL_PROVIDER), null));
+    }
+
+    // Malformed DocumentJson would fail with INVALID_DOCUMENT_JSON if it were read first.
+    private static void assertContentCreatedAtFailsFirst(final DocumentStateTestRecords.CacheRowBuilder builder) {
+        final Struct after = withRequiredNullsAllowed(builder
+                .field(DocumentStateTestRecords.DOCUMENT_JSON_FIELD,
+                        DocumentStateTestRecords.documentJsonSchema(DocumentState.POSTGRESQL_PROVIDER), "{")
+                .build());
+
+        final Throwable thrown = catchThrowable(() -> configuredTransform()
+                .apply(DocumentStateTestRecords.documentCacheRecord(DocumentState.POSTGRESQL_PROVIDER, after)));
+
+        assertThat(thrown).isInstanceOf(DocumentState.TransformationFailureException.class);
+        assertThat(((DocumentState.TransformationFailureException) thrown).reason())
+                .isEqualTo(DocumentState.FailureReason.MISSING_REQUIRED_FIELD);
+    }
+
+    // A source row can carry null in a required column, but Struct.put on the parent envelope validates
+    // children first. As in the DMS message-contract runner, skip only that construction-time check.
+    private static Struct withRequiredNullsAllowed(final Struct row) {
+        final Struct copy = new Struct(row.schema()) {
+            @Override
+            public void validate() {
+            }
+        };
+        for (final Field field : row.schema().fields()) {
+            final Object value = row.getWithoutDefault(field.name());
+            if (value != null) {
+                copy.put(field, value);
+            }
+        }
+        return copy;
     }
 
     private static DocumentState<SourceRecord> configuredTransform() {

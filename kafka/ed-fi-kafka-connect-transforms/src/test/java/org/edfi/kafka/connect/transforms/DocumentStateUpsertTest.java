@@ -65,6 +65,7 @@ class DocumentStateUpsertTest {
                         "resourceVersion",
                         "contentVersion",
                         "lastModifiedAt",
+                        "documentCreatedAt",
                         "document");
         assertThat(serializedValue)
                 .isEqualTo(DocumentStateSharedFixtures.toJson(fixture.expectedEnvelope()));
@@ -73,6 +74,29 @@ class DocumentStateUpsertTest {
                 .doesNotContain("ComputedAt")
                 .doesNotContain("\"source\"")
                 .doesNotContain("ts_ms");
+        assertNoCreationTimeInDocument(serializedValue.get("document"));
+    }
+
+    @ParameterizedTest
+    @MethodSource("providers")
+    void Given_Snapshot_Read_Of_Shared_Fixture_Row_Should_Publish_The_Same_Envelope_As_Create(
+            final String provider) throws IOException {
+        final DocumentStateSharedFixtures.SharedFixture fixture =
+                DocumentStateSharedFixtures.load(FIXTURE_CASE);
+        final SourceRecord record = DocumentStateTestRecords.documentCacheRecord(
+                provider, fixture.cacheRowStruct(provider), "r");
+
+        final SourceRecord result = DocumentStateTestRecords
+                .configuredTransform(provider)
+                .apply(record);
+
+        assertThat(result.topic()).isEqualTo(DocumentStateTestRecords.TARGET_TOPIC);
+        assertThat(result.key()).isEqualTo(fixture.documentUuid());
+        final JsonNode serializedValue = outputValue(result);
+        assertThat(serializedValue)
+                .isEqualTo(DocumentStateSharedFixtures.toJson(fixture.expectedEnvelope()));
+        assertThat(serializedValue.get("documentCreatedAt").asText()).isEqualTo("2025-03-04T05:06:10Z");
+        assertNoCreationTimeInDocument(serializedValue.get("document"));
     }
 
     @Test
@@ -81,7 +105,7 @@ class DocumentStateUpsertTest {
                 .cacheRowBuilder(DocumentState.SQLSERVER_PROVIDER)
                 .field(
                         DocumentStateTestRecords.LAST_MODIFIED_AT_FIELD,
-                        DocumentStateTestRecords.lastModifiedAtSchema(DocumentState.SQLSERVER_PROVIDER),
+                        DocumentStateTestRecords.timestampSchema(DocumentState.SQLSERVER_PROVIDER),
                         "2026-07-30T14:15:16.987654+00:00")
                 .build();
 
@@ -94,6 +118,7 @@ class DocumentStateUpsertTest {
         assertThat(value.get("documentUuid").asText()).isEqualTo(DocumentStateTestRecords.DOCUMENT_UUID);
         assertThat(value.get("contentVersion").longValue()).isEqualTo(222L);
         assertThat(value.get("lastModifiedAt").asText()).isEqualTo("2026-07-30T14:15:16Z");
+        assertThat(value.get("documentCreatedAt").asText()).isEqualTo("2025-03-04T05:06:10Z");
         assertThat(value.get("document").isObject()).isTrue();
         assertThat(value.get("documentUuid").asText()).isEqualTo(result.key());
 
@@ -344,6 +369,10 @@ class DocumentStateUpsertTest {
         assertFailure(thrown, expectedReason);
     }
 
+    private static Stream<String> providers() {
+        return Stream.of(DocumentState.POSTGRESQL_PROVIDER, DocumentState.SQLSERVER_PROVIDER);
+    }
+
     private static Stream<Object[]> malformedDocumentJsonRows() {
         return Stream.of(
                 malformedDocumentJson(DocumentState.POSTGRESQL_PROVIDER, "{",
@@ -453,6 +482,12 @@ class DocumentStateUpsertTest {
         assertThat(result.valueSchema().version()).isEqualTo(DocumentStateJsonConverter.PUBLIC_SCHEMA_VERSION);
         assertThat(result.valueSchema().isOptional()).isFalse();
         assertThat(result.value()).isInstanceOf(byte[].class);
+    }
+
+    private static void assertNoCreationTimeInDocument(final JsonNode document) {
+        assertThat(document.has("documentCreatedAt")).isFalse();
+        assertThat(document.has("ContentCreatedAt")).isFalse();
+        assertThat(document.has("_createdDate")).isFalse();
     }
 
     private static Iterable<String> fieldNames(final JsonNode node) {

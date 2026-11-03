@@ -41,6 +41,13 @@ final class DocumentStateSharedFixtures {
             "expectedPublicCdcDocumentPath";
     private static final String DOCUMENT_FIELD = "document";
     private static final String LAST_MODIFIED_DATE_FIELD = "_lastModifiedDate";
+    // Hard-coded, not derived: each E18 contentCreatedAt has a .654... fraction, so rounding instead of
+    // truncating would produce the next second. The public document has no creation-time counterpart.
+    private static final Map<String, String> EXPECTED_DOCUMENT_CREATED_AT = Map.of(
+            "ordinary-link-bearing-student-school-association", "2025-03-04T05:06:10Z",
+            "descriptor-school-type", "2025-03-04T05:06:01Z",
+            "extension-student-school-association", "2025-03-04T05:06:02Z",
+            "school-address-property-absence", "2025-03-04T05:06:12Z");
 
     private DocumentStateSharedFixtures() {
     }
@@ -64,10 +71,17 @@ final class DocumentStateSharedFixtures {
         final JsonNode publicDocument =
                 readRequiredObject(publicDocumentPath, "shared DMS expected public CDC document");
         final JsonNode expectedDocument = requiredObject(publicDocument, DOCUMENT_FIELD, publicDocumentPath);
+        final CacheRowData cacheRowData = new CacheRowData(cacheRow, cacheRowPath);
+        final String expectedDocumentCreatedAt = EXPECTED_DOCUMENT_CREATED_AT.get(caseName);
+        if (expectedDocumentCreatedAt == null) {
+            throw new IllegalStateException("No expected documentCreatedAt is pinned for shared fixture case "
+                    + caseName);
+        }
         return new SharedFixture(
-                new CacheRowData(cacheRow, cacheRowPath),
+                cacheRowData,
                 expectedDocument,
-                requiredText(expectedDocument, LAST_MODIFIED_DATE_FIELD, publicDocumentPath));
+                requiredText(expectedDocument, LAST_MODIFIED_DATE_FIELD, publicDocumentPath),
+                expectedDocumentCreatedAt);
     }
 
     static JsonNode toJson(final Object value) throws IOException {
@@ -204,15 +218,18 @@ final class DocumentStateSharedFixtures {
         private final CacheRowData cacheRow;
         private final JsonNode expectedDocument;
         private final String expectedLastModifiedAt;
+        private final String expectedDocumentCreatedAt;
         private final JsonNode expectedEnvelope;
 
         private SharedFixture(
                 final CacheRowData cacheRow,
                 final JsonNode expectedDocument,
-                final String expectedLastModifiedAt) {
+                final String expectedLastModifiedAt,
+                final String expectedDocumentCreatedAt) {
             this.cacheRow = cacheRow;
             this.expectedDocument = expectedDocument;
             this.expectedLastModifiedAt = expectedLastModifiedAt;
+            this.expectedDocumentCreatedAt = expectedDocumentCreatedAt;
             this.expectedEnvelope = createExpectedEnvelope();
         }
 
@@ -244,8 +261,11 @@ final class DocumentStateSharedFixtures {
                     .field(DocumentStateTestRecords.STREAM_ETAG_FIELD, Schema.STRING_SCHEMA,
                             cacheRow.streamEtag)
                     .field(DocumentStateTestRecords.LAST_MODIFIED_AT_FIELD,
-                            DocumentStateTestRecords.lastModifiedAtSchema(provider),
+                            DocumentStateTestRecords.timestampSchema(provider),
                             cacheRow.lastModifiedAt)
+                    .field(DocumentStateTestRecords.CONTENT_CREATED_AT_FIELD,
+                            DocumentStateTestRecords.timestampSchema(provider),
+                            cacheRow.contentCreatedAt)
                     .field(DocumentStateTestRecords.DOCUMENT_JSON_FIELD,
                             DocumentStateTestRecords.documentJsonSchema(provider),
                             MAPPER.writeValueAsString(cacheRow.documentJson))
@@ -266,6 +286,7 @@ final class DocumentStateSharedFixtures {
             expected.put("resourceVersion", cacheRow.resourceVersion);
             expected.put("contentVersion", cacheRow.contentVersion);
             expected.put("lastModifiedAt", expectedLastModifiedAt);
+            expected.put("documentCreatedAt", expectedDocumentCreatedAt);
             expected.set("document", expectedDocument);
             return expected;
         }
@@ -280,6 +301,7 @@ final class DocumentStateSharedFixtures {
         private final long contentVersion;
         private final String streamEtag;
         private final String lastModifiedAt;
+        private final String contentCreatedAt;
         private final JsonNode documentJson;
 
         private CacheRowData(final JsonNode json, final Path path) {
@@ -291,6 +313,7 @@ final class DocumentStateSharedFixtures {
             this.contentVersion = requiredLong(json, "contentVersion", path);
             this.streamEtag = requiredText(json, "streamEtag", path);
             this.lastModifiedAt = requiredText(json, "lastModifiedAt", path);
+            this.contentCreatedAt = requiredText(json, "contentCreatedAt", path);
             this.documentJson = requiredObject(json, "documentJson", path);
         }
     }

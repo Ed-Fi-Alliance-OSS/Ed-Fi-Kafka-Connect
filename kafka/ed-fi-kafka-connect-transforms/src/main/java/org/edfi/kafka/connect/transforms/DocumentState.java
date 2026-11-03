@@ -43,6 +43,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
     private static final String CONTENT_VERSION_FIELD = "ContentVersion";
     private static final String STREAM_ETAG_FIELD = "StreamEtag";
     private static final String LAST_MODIFIED_AT_FIELD = "LastModifiedAt";
+    private static final String CONTENT_CREATED_AT_FIELD = "ContentCreatedAt";
     private static final String DOCUMENT_JSON_FIELD = "DocumentJson";
     private static final String RELATIONAL_SCHEMA = "dms";
     private static final String DOCUMENT_CACHE_TABLE = "DocumentCache";
@@ -452,6 +453,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
         UNAVAILABLE_DOCUMENT_JSON("unavailable DocumentJson"),
         DOCUMENT_JSON_HAS_ETAG("DocumentJson contains _etag"),
         INVALID_LAST_MODIFIED_AT("invalid LastModifiedAt"),
+        INVALID_CONTENT_CREATED_AT("invalid ContentCreatedAt"),
         PUBLIC_DOCUMENT_INVARIANT_MISMATCH("public document invariant mismatch");
 
         private final String description;
@@ -651,6 +653,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
         private final long contentVersion;
         private final String streamEtag;
         private final String lastModifiedAt;
+        private final String contentCreatedAt;
         private final String documentJson;
 
         RetainedCacheRow(
@@ -660,6 +663,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
                 final long contentVersion,
                 final String streamEtag,
                 final String lastModifiedAt,
+                final String contentCreatedAt,
                 final String documentJson) {
             this.projectName = projectName;
             this.resourceName = resourceName;
@@ -667,6 +671,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
             this.contentVersion = contentVersion;
             this.streamEtag = streamEtag;
             this.lastModifiedAt = lastModifiedAt;
+            this.contentCreatedAt = contentCreatedAt;
             this.documentJson = documentJson;
         }
 
@@ -692,6 +697,10 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
 
         String lastModifiedAt() {
             return lastModifiedAt;
+        }
+
+        String contentCreatedAt() {
+            return contentCreatedAt;
         }
 
         String documentJson() {
@@ -917,7 +926,12 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
                     requiredString(row, RESOURCE_VERSION_FIELD, FieldKind.PLAIN_STRING, record, classifiedRecord),
                     requiredContentVersion(row, record, classifiedRecord),
                     requiredString(row, STREAM_ETAG_FIELD, FieldKind.PLAIN_STRING, record, classifiedRecord),
-                    requiredLastModifiedAt(row, record, classifiedRecord),
+                    requiredTimestamp(
+                            row, LAST_MODIFIED_AT_FIELD, FailureReason.INVALID_LAST_MODIFIED_AT, record,
+                            classifiedRecord),
+                    requiredTimestamp(
+                            row, CONTENT_CREATED_AT_FIELD, FailureReason.INVALID_CONTENT_CREATED_AT, record,
+                            classifiedRecord),
                     requiredString(row, DOCUMENT_JSON_FIELD, FieldKind.DOCUMENT_JSON, record, classifiedRecord));
         }
 
@@ -976,26 +990,28 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
             return (Long) value;
         }
 
-        private String requiredLastModifiedAt(
+        private String requiredTimestamp(
                 final Struct row,
+                final String fieldName,
+                final FailureReason invalidValueReason,
                 final ConnectRecord<?> record,
                 final ClassifiedRecord classifiedRecord) {
-            final var field = row.schema().field(LAST_MODIFIED_AT_FIELD);
+            final var field = row.schema().field(fieldName);
             if (field == null) {
                 throw classifiedFailure(FailureReason.MISSING_REQUIRED_FIELD, record, classifiedRecord);
             }
-            if (!isPinnedLastModifiedAtSchema(field.schema())) {
+            if (!isPinnedTimestampSchema(field.schema())) {
                 throw classifiedFailure(FailureReason.UNSUPPORTED_REQUIRED_FIELD_SHAPE, record, classifiedRecord);
             }
 
-            final Object value = row.getWithoutDefault(LAST_MODIFIED_AT_FIELD);
+            final Object value = row.getWithoutDefault(fieldName);
             if (value == null) {
                 throw classifiedFailure(FailureReason.MISSING_REQUIRED_FIELD, record, classifiedRecord);
             }
             if (!(value instanceof String) || ((String) value).isEmpty()) {
-                throw classifiedFailure(FailureReason.INVALID_LAST_MODIFIED_AT, record, classifiedRecord);
+                throw classifiedFailure(invalidValueReason, record, classifiedRecord);
             }
-            return DocumentStateJson.normalizeLastModifiedAt((String) value, record, classifiedRecord);
+            return DocumentStateJson.normalizeTimestamp((String) value, invalidValueReason, record, classifiedRecord);
         }
 
         private boolean isPinnedStringSchema(final Schema schema, final FieldKind fieldKind) {
@@ -1008,7 +1024,7 @@ public class DocumentState<R extends ConnectRecord<R>> implements Transformation
             return schema.name() == null;
         }
 
-        private boolean isPinnedLastModifiedAtSchema(final Schema schema) {
+        private boolean isPinnedTimestampSchema(final Schema schema) {
             if (schema.type() != Schema.Type.STRING || schema.isOptional()) {
                 return false;
             }
